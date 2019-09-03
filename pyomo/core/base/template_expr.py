@@ -257,6 +257,20 @@ def substitute_template_with_value(expr):
 
 
 class mock_globals(object):
+    """Implement custom context for a user-specified function.
+
+    This class implements a custom context that injects user-specified
+    attributes into the globals() context before calling a function (and
+    then cleans up the global context after the function returns).
+
+    Parameters
+    ----------
+        fcn : function
+            The function whose globals context will be overridden
+        overrides : dict
+            A dict mapping {name: object} that will be injected into the
+            `fcn` globals() context.
+    """
     __slots__ = ('_data',)
 
     def __init__(self, fcn, overrides):
@@ -280,7 +294,15 @@ class mock_globals(object):
                     del fcn.__globals__[name]
 
 
-class _set_iterator(object):
+class _set_iterator_template_generator(object):
+    """Replacement iterator that returns IndexTemplates
+
+    In order to generate template expressions, we hijack the normal Set
+    iteration mechanisms so that this iterator is returned instead of
+    the usual iterator.  This iterator will return IndexTemplate
+    object(s) instead of the actual Set items the first time next() is
+    called.
+    """
     def __init__(self, _set, context):
         self._set = _set
         self.context = context
@@ -289,6 +311,7 @@ class _set_iterator(object):
         return self
 
     def __next__(self):
+        # Prevent context from ever being called more than once
         if self.context is None:
             raise StopIteration()
 
@@ -309,13 +332,22 @@ class _set_iterator(object):
 
     next = __next__
 
-class _iter_generates_template(object):
+class _template_iter_context(object):
+    """Manage the iteration context when generating templatized rules
+
+    This class manages the context tracking when generating templatized
+    rules.  It has two methods (`sum_template` and `get_iter`) that
+    replace standard functions / methods (`sum` and
+    :py:meth:`_FiniteSetMixin.__iter__`, respectively).  It also tracks
+    unique identifiers for IndexTemplate objects and their groupings
+    within `sum()` generators.
+    """
     def __init__(self):
         self.cache = []
         self._id = 0
 
-    def __call__(self, _set):
-        return _set_iterator(_set, self)
+    def get_iter(self, _set):
+        return _set_iterator_template_generator(_set, self)
 
     def npop_cache(self, n):
         result = self.cache[-n:]
@@ -335,21 +367,36 @@ class _iter_generates_template(object):
         )
 
 def templatize_rule(block, rule, index_set):
-    context = _iter_generates_template()
+    context = _template_iter_context()
     _rule = mock_globals(rule, {'sum': context.sum_template})
     try:
+        # Override Set iteration to return IndexTemplates
         _old_iter = pyomo.core.base.set._FiniteSetMixin.__iter__
-        pyomo.core.base.set._FiniteSetMixin.__iter__ = lambda x: context(x)
+        pyomo.core.base.set._FiniteSetMixin.__iter__ = \
+            lambda x: context.get_iter(x)
+        # Get the index templates needed for calling the rule
         if index_set is not None:
             if not index_set.isfinite():
                 raise TemplateExpressionError(
+                    None,
                     "Cannot templatize rule with non-finite indexing set")
             indices = iter(index_set).next()
+            context.cache.pop()
         else:
             indices = ()
         if type(indices) is not tuple:
             indices = (indices,)
-
+        # Call the rule, returning the template expression and the
+        # top-level IndexTemplaed generated when calling the rule.
+        #
+        # TBD: Should this just return a "FORALL()" expression node that
+        # behaves similarly to the GetItemExpression node?
         return _rule(block, *indices), indices
     finally:
         pyomo.core.base.set._FiniteSetMixin.__iter__ = _old_iter
+        if len(context.cache):
+            raise TemplateExpressionError(
+                None,
+                "Explicit iteration (for loops) over Sets is not supported by "
+                "template expressions.  Encountered loop over %s"
+                % (context.cache[-1][0]._set,))
