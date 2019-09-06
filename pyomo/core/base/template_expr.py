@@ -368,12 +368,15 @@ class _template_iter_context(object):
 
 def templatize_rule(block, rule, index_set):
     context = _template_iter_context()
-    _rule = mock_globals(rule, {'sum': context.sum_template})
+    #rule = mock_globals(rule, {'sum': context.sum_template})
     try:
         # Override Set iteration to return IndexTemplates
         _old_iter = pyomo.core.base.set._FiniteSetMixin.__iter__
         pyomo.core.base.set._FiniteSetMixin.__iter__ = \
             lambda x: context.get_iter(x)
+        # Override sum with our sum
+        _old_sum = __builtins__['sum']
+        __builtins__['sum'] = context.sum_template
         # Get the index templates needed for calling the rule
         if index_set is not None:
             if not index_set.isfinite():
@@ -391,9 +394,10 @@ def templatize_rule(block, rule, index_set):
         #
         # TBD: Should this just return a "FORALL()" expression node that
         # behaves similarly to the GetItemExpression node?
-        return _rule(block, *indices), indices
+        return rule(block, *indices), indices
     finally:
         pyomo.core.base.set._FiniteSetMixin.__iter__ = _old_iter
+        __builtins__['sum'] = _old_sum
         if len(context.cache):
             raise TemplateExpressionError(
                 None,
