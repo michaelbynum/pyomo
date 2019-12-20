@@ -24,6 +24,7 @@ from pyomo.common.config import (
     ConfigBlock, ConfigList, ConfigValue, add_docstring_list, In, Path,
 )
 from pyomo.common.fileutils import Executable, this_file_dir
+from pyomo.common.timing import TicTocTimer
 from pyomo.solver.base import MIPSolver, SolverResults
 from pyomo.writer.cpxlp import ProblemWriter_cpxlp
 
@@ -123,6 +124,7 @@ class GurobiSolver_LP(GurobiSolver):
 
 
     def _apply_solver(self, model, options, config):
+        T = TicTocTimer()
         if not config.problemfile:
             config.problemfile = TempfileManager.create_tempfile(
                 suffix='.pyomo.lp')
@@ -143,12 +145,14 @@ class GurobiSolver_LP(GurobiSolver):
         # (skip_implicit alloes the config to have additional fields
         # that are ignored)
         writer_config.set_value(config, skip_implicit=True)
+        T.toc("gurobi setup complete")
         fname, symbol_map = ProblemWriter_cpxlp()(
             model=model,
             output_filename=config.problemfile,
             io_options=writer_config
         )
         assert fname == str(config.problemfile)
+        T.toc("gurobi lp write complete")
 
         # Handle mapped options
         mipgap = config.mipgap
@@ -173,7 +177,9 @@ class GurobiSolver_LP(GurobiSolver):
         cmd = [ str(config.executable),
                 os.path.join(this_file_dir(), 'GUROBI_RUN.py') ]
         try:
+            T.toc("gurobi other preminaries done")
             rc, log = run(cmd, stdin=data, timelimit=timelim, tee=config.tee)
+            T.toc("gurobi subprocess complete")
         except WindowsError:
             raise ApplicationError(
                 'Could not execute the command: %s\tError message: %s'
@@ -212,6 +218,7 @@ class GurobiSolver_LP(GurobiSolver):
                 v = symbol_map.getObject(vname)
                 v.value = X[i]
 
+        T.toc("gurobi solution load complete")
         return results
         
 

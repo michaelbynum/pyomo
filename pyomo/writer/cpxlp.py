@@ -21,12 +21,13 @@ from six.moves import xrange
 
 from pyutilib.misc import PauseGC
 
+from pyomo.common.timing import TicTocTimer
 from pyomo.common.config import ConfigBlock, ConfigValue, In
 from pyomo.opt import ProblemFormat
 from pyomo.opt.base import AbstractProblemWriter, WriterFactory
 from pyomo.core.base.label import LabelWrapper, TextLabeler, NumericLabeler
 from pyomo.core.base import (
-    SymbolMap,
+    SymbolMap, SymbolMap_noWeakref,
     Constraint, SortComponents,
     Var, value,
     SOSConstraint, Objective,
@@ -1061,6 +1062,8 @@ class ProblemWriter_cpxlp(object):
                  output_filename,
                  io_options=None,
                  **kwds):
+        global T
+        T = TicTocTimer()
 
         config = self.CONFIG(io_options)(kwds)
 
@@ -1092,6 +1095,7 @@ class ProblemWriter_cpxlp(object):
                 symbol_map = self._print_model_LP(
                     config, model, output, labeler)
 
+        T.toc("Write complete", delta=False)
         return output_filename, symbol_map
 
     def _print_model_LP(self, config, model, output, labeler):
@@ -1109,13 +1113,14 @@ class ProblemWriter_cpxlp(object):
         ru_labeler = LabelWrapper(labeler, 'r_u_%s_')
         s_labeler = LabelWrapper(labeler, 'S%s')
 
-        symbol_map = SymbolMap()
+        symbol_map = SymbolMap_noWeakref()
         sym = symbol_map.getSymbol
 
         # Prep the variable ordering dictionary
         varOrder = _objectOrderer(config.column_order)
         conOrder = _objectOrderer(config.row_order)
 
+        T.toc("Setup complete")
         objective_generator = model.component_data_objects(
             Objective, active=True)
         obj = next(objective_generator, None)
@@ -1153,6 +1158,7 @@ class ProblemWriter_cpxlp(object):
                       "\n%s:\n" % sym(obj, LabelWrapper(labeler, "o_%s")) )
         self._print_standard_repn(
             output, repn, config, True, varOrder, sym, labeler)
+        T.toc("Objective complete")
 
         # Constraints
         #
@@ -1220,6 +1226,7 @@ class ProblemWriter_cpxlp(object):
         # worst-case, if not used, is that CPLEX easily pre-processes it out.
         output.write('c_ONE_VAR_CONSTANT: \n'
                      'ONE_VAR_CONSTANT = 1.0\n\n')
+        T.toc("Constraints complete")
 
 
         #
@@ -1306,6 +1313,7 @@ class ProblemWriter_cpxlp(object):
                 varSymbol,
                 _no_negative_zero(ub) if var.has_ub() else '+inf',))
 
+        T.toc("Bounds complete")
         if integer_vars:
             output.write('general\n  ' + '\n  '.join(integer_vars) + '\n')
         if binary_vars:
@@ -1316,6 +1324,7 @@ class ProblemWriter_cpxlp(object):
 
         output.write('end\n')
 
+        T.toc("Vars complete")
         return symbol_map
 
 
