@@ -87,6 +87,15 @@ def alphanum_label_from_name(name):
 
     return _translate(name, _alphanum_translation_table)
 
+
+class LabelWrapper(object):
+    def __init__(self, labeler, format_string):
+        self.labeler = labeler
+        self.format_string = format_string
+
+    def __call__(self, obj=None):
+        return self.format_string % self.labeler(obj)
+
 class CuidLabeler(object):
 
     def __call__(self, obj=None):
