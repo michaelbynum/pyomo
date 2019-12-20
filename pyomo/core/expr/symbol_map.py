@@ -8,6 +8,7 @@
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
+from weakref import ref as weakref_ref
 from six import iteritems, iterkeys
 
 class SymbolMap(object):
@@ -27,8 +28,8 @@ class SymbolMap(object):
 
     Attributes:
         byObject (dict):  maps (object id) to (string label)
-        bySymbol (dict):  maps (string label) to (object)
-        alias (dict):  maps (string label) to (object)
+        bySymbol (dict):  maps (string label) to (object weakref)
+        alias (dict):  maps (string label) to (object weakref)
         default_labeler: used to compute a string label from an object
     """
 
@@ -50,22 +51,26 @@ class SymbolMap(object):
         # to pickle one of them, and bySymbol is easier.
         #
         return {
-            'bySymbol': self.bySymbol,
-            'aliases': self.aliases,
-            'default_labeler': self.default_labeler,
+            'bySymbol': tuple(
+                (key, obj()) for key, obj in iteritems(self.bySymbol) ),
+            'aliases': tuple(
+                (key, obj()) for key, obj in iteritems(self.aliases) ),
         }
 
     def __setstate__(self, state):
-        for k,v in iteritems(state):
-            setattr(self, k, v)
-        self.byObject = {id(obj): key for key, obj in self.bySymbol}
+        self.byObject = dict(
+            (id(obj), key) for key, obj  in state['bySymbol'] )
+        self.bySymbol = dict(
+            (key, weakref_ref(obj)) for key, obj in state['bySymbol'] )
+        self.aliases = dict(
+            (key, weakref_ref(obj)) for key, obj in state['aliases'] )
 
     def addSymbol(self, obj, symb):
         """
         Add a symbol for a given object
         """
         self.byObject[id(obj)] = symb
-        self.bySymbol[symb] = obj
+        self.bySymbol[symb] = weakref_ref(obj)
 
     def addSymbols(self, obj_symbol_tuples):
         """
@@ -73,9 +78,9 @@ class SymbolMap(object):
 
         This method assumes that symbol names will not conflict.
         """
-        tuples = tuple(obj_symbol_tuples)
+        tuples = list((obj, symb) for obj,symb in obj_symbol_tuples)
         self.byObject.update((id(obj_), symb_) for obj_,symb_ in tuples)
-        self.bySymbol.update((symb_, obj_) for obj_,symb_ in tuples)
+        self.bySymbol.update((symb_, weakref_ref(obj_)) for obj_,symb_ in tuples)
 
     def createSymbol(self, obj, labeler=None, *args):
         """
@@ -94,7 +99,7 @@ class SymbolMap(object):
         else:
             symb = str(obj)
         self.byObject[id(obj)] = symb
-        self.bySymbol[symb] = obj
+        self.bySymbol[symb] = weakref_ref(obj)
         return symb
 
     def createSymbols(self, objs, labeler, *args):
@@ -127,12 +132,12 @@ class SymbolMap(object):
         else:
             symb = str(obj)
         if symb in self.bySymbol:
-            if self.bySymbol[symb] is not obj:
+            if self.bySymbol[symb]() is not obj:
                 raise RuntimeError(
                     "Duplicate symbol '%s' already associated with "
                     "component '%s' (conflicting component: '%s')"
-                    % (symb, self.bySymbol[symb].name, obj.name) )
-        self.bySymbol[symb] = obj
+                    % (symb, self.bySymbol[symb]().name, obj.name) )
+        self.bySymbol[symb] = weakref_ref(obj)
         self.byObject[obj_id] = symb
         return symb
 
@@ -146,29 +151,28 @@ class SymbolMap(object):
             # If the alias exists and the objects are the same,
             # then return.  Otherwise, raise an exception.
             #
-            old_object = self.aliases[name]
+            old_object = self.aliases[name]()
             if old_object is obj:
                 return
             else:
                 raise RuntimeError(
                     "Duplicate alias '%s' already associated with "
                     "component '%s' (conflicting component: '%s')"
-                    % (name, "UNKNOWN" if old_object is None
-                       else old_object.name, obj.name) )
+                    % (name, "UNKNOWN" if old_object is None else old_object.name, obj.name) )
         else:
             #
             # Add the alias
             #
-            self.aliases[name] = obj
+            self.aliases[name] = weakref_ref(obj)
 
     def getObject(self, symbol):
         """
         Return the object corresponding to a symbol
         """
         if symbol in self.bySymbol:
-            return self.bySymbol[symbol]
+            return self.bySymbol[symbol]()
         elif symbol in self.aliases:
-            return self.aliases[symbol]
+            return self.aliases[symbol]()
         else:
             return SymbolMap.UnknownSymbol
 
