@@ -2,28 +2,43 @@
 #
 #  Pyomo: Python Optimization Modeling Objects
 #  Copyright 2017 National Technology and Engineering Solutions of Sandia, LLC
-#  Under the terms of Contract DE-NA0003525 with National Technology and 
-#  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain 
+#  Under the terms of Contract DE-NA0003525 with National Technology and
+#  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
 #  rights in this software.
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
 
-from pyomo.common.config import ConfigBlock, ConfigValue
+from pyomo.common.config import ConfigBlock, ConfigValue, NonNegativeFloat
 from pyomo.common.errors import DeveloperError
 from pyomo.common.deprecation import deprecated
-from pyomo.core.base.set import NonNegativeReals
+
+from pyomo.opt.results import SolverResults
 
 class Solver(object):
     """A generic optimization solver"""
 
     CONFIG = ConfigBlock()
+    CONFIG.declare('timelimit', ConfigValue(
+        default=None,
+        domain=NonNegativeFloat,
+    ))
+    CONFIG.declare('keepfiles', ConfigValue(
+        default=False,
+        domain=bool,
+    ))
+    CONFIG.declare('tee', ConfigValue(
+        default=False,
+        domain=bool,
+    ))
+    CONFIG.declare('load_solution', ConfigValue(
+        default=True,
+        domain=bool,
+    ))
 
-    MAPPED_OPTIONS = ConfigBlock()
 
     def __init__(self, **kwds):
         self.config = self.CONFIG()
-        self.mapped_options = self.MAPPED_OPTIONS()
         self.options = ConfigBlock(implicit=True)
 
     def available(self):
@@ -35,7 +50,7 @@ class Solver(object):
         raise DeveloperError(
             "Derived Solver class %s failed to implement license_status()"
             % (self.__class__.__name__,))
-        
+
     def version(self):
         """
         Returns a tuple describing the solver version.
@@ -44,7 +59,7 @@ class Solver(object):
             "Derived Solver class %s failed to implement version()"
             % (self.__class__.__name__,))
 
-    def solve(self, model, options=None, mapped_options=None, **config_options):
+    def solve(self, model, options=None, **config_options):
         raise DeveloperError(
             "Derived Solver class %s failed to implement solve()"
             % (self.__class__.__name__,))
@@ -54,15 +69,28 @@ class Solver(object):
     def __bool__(self):
         return self.available()
 
+    ####################################################################
+    #  The following are "hacks" to support the pyomo command (and
+    #  compatability with existing solvers)
+
+    #
+    # Support "with" statements.
+    #
+    def __enter__(self):
+        return self
+
+    def __exit__(self, t, v, traceback):
+        pass
+
 
 class MIPSolver(Solver):
-    MAPPED_OPTIONS = Solver.MAPPED_OPTIONS()
-    MAPPED_OPTIONS.declare('mipgap', ConfigValue(
+    CONFIG = Solver.CONFIG()
+    CONFIG.declare('mipgap', ConfigValue(
         default=None,
-        domain=NonNegativeReals,
+        domain=NonNegativeFloat,
     ))
-    MAPPED_OPTIONS.declare('relax_integrality', ConfigValue(
+    CONFIG.declare('relax_integrality', ConfigValue(
         default=False,
         domain=bool,
     ))
-    
+

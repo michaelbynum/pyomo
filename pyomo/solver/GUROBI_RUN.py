@@ -14,9 +14,9 @@ third party packages are available!
 """
 import sys
 try:
-    import ujson as json
+    import cPickle as pickle
 except ImportError:
-    import json
+    import pickle
 
 from gurobipy import *
 
@@ -24,6 +24,7 @@ if sys.version_info[0] < 3:
     from itertools import izip as zip
 
 GUROBI_VERSION = gurobi.version()
+NUM_SOLNS = 1
 
 # NOTE: this function / module is independent of Pyomo, and only relies
 #       on the GUROBI python bindings. consequently, nothing in this
@@ -230,67 +231,54 @@ def gurobi_run(model_file, pyomo_options, options, suffixes):
 
     results = {}
     problem = results['problem'] = {}
-    
-    # TODO: find out about bounds and fix this with error checking
-    # this line fails for some reason so set the value to unknown
-    try:
-        bound = model.getAttr(GRB.Attr.ObjBound)
-    except Exception:
-        if term_cond == 'optimal':
-            bound = obj_value
-        else:
-            bound = None
 
-    if (sense < 0):
-        problem['upper_bound'] = float('inf') if bound is None else bound
+    if model.getAttr(GRB.Attr.ObjBound) < 0:
+        problem['sense'] = 'maximize'
+        problem['lower_bound'] = obj_value
+        problem['upper_bound'] = model.getAttr(GRB.Attr.ObjBound)
     else:
-        problem['lower_bound'] = float('-inf') if bound is None else bound
+        problem['sense'] = 'minimize'
+        problem['lower_bound'] = model.getAttr(GRB.Attr.ObjBound)
+        problem['upper_bound'] = obj_value
 
     # TODO: Get the number of objective functions from GUROBI
     n_objs = 1
     problem['number_of_objectives'] = n_objs
 
-    cons = model.getConstraints()
-    qcons = model.getQConstrs() if GUROBI_VERSION[0] >= 5 else []
-    problem['number_of_constraints'] = len(cons) + len(qcons) + model.NumSOS
-
     vars = model.getVars()
+    cons = model.getConstrs()
+    qcons = model.getQConstrs() if GUROBI_VERSION[0] >= 5 else []
+
+    problem['number_of_constraints'] = len(cons) + len(qcons) + model.NumSOS
     problem['number_of_variables'] = len(vars)
-
-    n_binvars = model.getAttr(GRB.Attr.NumBinVars)
-    problem['number_of_binary_variables'] = n_binvars
-
+    problem['number_of_binary_variables'] = model.getAttr(GRB.Attr.NumBinVars)
     n_intvars = model.getAttr(GRB.Attr.NumIntVars)
     problem['number_of_integer_variables'] = n_intvars
-
     problem['number_of_continuous_variables'] = len(vars)-n_intvars
-
     problem['number_of_nonzeros'] = model.getAttr(GRB.Attr.NumNZs)
 
     # write out the information required by results.solver
     solver = results['solver'] = {}
     solver['status'] = status
     solver['message'] = message
-    solver['wall_time'] = wall_time
+    solver['wallclock_time'] = wall_time
     solver['termination_condition'] = term_cond
     solver['termination_message'] = message
-
-    is_discrete = False
-    if (model.getAttr(GRB.Attr.IsMIP)):
-        is_discrete = True
 
     solution = results['solution'] = {}
     solution['status'] = solution_status
     solution['message'] = message
-    solutions = solution['solutions'] = []
-    
-    for solID in xrange(min(model.getAttr(GRB.Attr.SolCount, NUM_SOLNS))):
+    solutions = solution['points'] = []
+
+    is_discrete = model.getAttr(GRB.Attr.IsMIP)
+    for solID in xrange(min(model.getAttr(GRB.Attr.SolCount), NUM_SOLNS)):
         model.setParam('SolutionNumber', solID)
         _sol = {
-            'gap': model.getAttr("MIPGap"),
             'X': model.getAttr("X", vars),
             'VarName': model.getAttr("VarName", vars),
         }
+        if is_discrete:
+            _sol['gap'] = model.getAttr("MIPGap")
         if extract_slacks or extract_duals or extract_reduced_costs:
             _sol['ConstrName'] = model.getAttr("ConstrName", cons)
             if GUROBI_VERSION[0] >= 5:
@@ -305,7 +293,7 @@ def gurobi_run(model_file, pyomo_options, options, suffixes):
             _sol['Slack'] = model.getAttr("Slack", cons)
             if GUROBI_VERSION[0] >= 5:
                 _sol['QCSlack'] = model.getAttr("QCSlack", qcons)
-        
+
         solutions.append(_sol)
 
     return results
@@ -313,8 +301,8 @@ def gurobi_run(model_file, pyomo_options, options, suffixes):
 
 if __name__ == '__main__':
     model_file, soln_file, pyomo_options, options, suffixes = \
-        json.loads(sys.stdin)
+        pickle.load(sys.stdin)
     results = gurobi_run(model_file, pyomo_options, options, suffixes)
-    with open(soln_file, 'w') as SOLN:
-        json.dump(SOLN, results)
-    
+    with open(soln_file, 'wb') as SOLN:
+        pickle.dump(results, SOLN, protocol=2)
+

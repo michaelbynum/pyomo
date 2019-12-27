@@ -8,21 +8,31 @@
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
+import os
 import sys
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+from six import iteritems
 
+from pyutilib.common import ApplicationError, WindowsError
 from pyutilib.services import TempfileManager
+from pyutilib.subprocess import run
 
 from pyomo.common.config import (
-    ConfigBlock, ConfigList, ConfigValue, add_docstring_list, In,
+    ConfigBlock, ConfigList, ConfigValue, add_docstring_list, In, Path,
 )
-from pyomo.common.fileutils import Executable
-from pyomo.solver.base import Solver
+from pyomo.common.fileutils import Executable, this_file_dir
+from pyomo.common.timing import TicTocTimer
+from pyomo.solver.base import MIPSolver, SolverResults
 from pyomo.writer.cpxlp import ProblemWriter_cpxlp
 
-class GurobiSolver(Solver):
-    CONFIG = Solver.CONFIG()
+from pyomo.opt.base.solvers import SolverFactory
 
-    MAPPED_OPTIONS = Solver.MAPPED_OPTIONS()
+@SolverFactory.register('NEW_gurobi', doc='The GUROBI LP/MIP solver')
+class GurobiSolver(MIPSolver):
+    CONFIG = MIPSolver.CONFIG()
 
     def __new__(cls, **kwds):
         if cls != GurobiSolver:
@@ -52,11 +62,26 @@ class GurobiSolver_LP(GurobiSolver):
         default='gurobi.bat' if sys.platform == 'win32' else 'gurobi.sh' ,
         domain=Executable,
     ))
+    CONFIG.declare("problemfile", ConfigValue(
+        default=None,
+        domain=Path(),
+    ))
+    CONFIG.declare("logfile", ConfigValue(
+        default=None,
+        domain=Path(),
+    ))
+    CONFIG.declare("solnfile", ConfigValue(
+        default=None,
+        domain=Path(),
+    ))
+    CONFIG.declare("warmstart_file", ConfigValue(
+        default=None,
+        domain=Path(),
+    ))
+
     CONFIG.inherit_from(ProblemWriter_cpxlp.CONFIG, skip={
         'allow_quadratic_objective', 'allow_quadratic_constraints',
         'allow_sos1', 'allow_sos2'})
-
-    MAPPED_OPTIONS = GurobiSolver.MAPPED_OPTIONS()
 
     def available(self):
         return self.config.executable.path() is not None
@@ -82,21 +107,25 @@ class GurobiSolver_LP(GurobiSolver):
         return rc == 0
 
 
-    def solve(self, model, options=None, mapped_options=None, **config_options):
+    def solve(self, model, options=None, **config_options):
         """Solve a model""" + add_docstring_list("", GurobiSolver_LP.CONFIG)
 
         options = self.options(options)
-        mapped_options = self.mapped_options(mapped_options)
         config = self.config(config_options)
 
         try:
-            return self._apply_solver(model, options, mapped_options, config)
+            TempfileManager.push()
+            return self._apply_solver(model, options, config)
         finally:
-            self.cleanup(model, options, mapped_options, config)
+            # finally, clean any temporary files registered with the
+            # temp file manager, created populated *directly* by this
+            # plugin.
+            TempfileManager.pop(remove=not config.keepfiles)
 
 
-    def _apply_solver(self, model, options, mapped_options, config):
-        if not config.problemfile is None:
+    def _apply_solver(self, model, options, config):
+        T = TicTocTimer()
+        if not config.problemfile:
             config.problemfile = TempfileManager.create_tempfile(
                 suffix='.pyomo.lp')
         if not config.logfile:
@@ -108,44 +137,49 @@ class GurobiSolver_LP(GurobiSolver):
         
         # Gurobi can support certain problem features
         writer_config = ProblemWriter_cpxlp.CONFIG()
-        writer_config.allow_quadratic_objective.set_default(True)
-        writer_config.allow_quadratic_constrinat.set_default(True)
-        writer_config.allow_sos1.set_default(True)
-        writer_config.allow_sos2.set_default(True)
+        writer_config.allow_quadratic_objective = True
+        writer_config.allow_quadratic_constraints = True
+        writer_config.allow_sos1 = True
+        writer_config.allow_sos2 = True
         # Copy over the relevant values from the solver config
         # (skip_implicit alloes the config to have additional fields
         # that are ignored)
-        writer.set_value(config, skip_implicit=True)
-        fname, symbol_map = ProblemWriter_cpxlp(
+        writer_config.set_value(config, skip_implicit=True)
+        T.toc("gurobi setup complete")
+        fname, symbol_map = ProblemWriter_cpxlp()(
             model=model,
-            output_filename=config.problemfile.path(),
+            output_filename=config.problemfile,
             io_options=writer_config
         )
         assert fname == str(config.problemfile)
+        T.toc("gurobi lp write complete")
 
         # Handle mapped options
-        mipgap = mapped_options.mipgap
+        mipgap = config.mipgap
         if mipgap is not None:
             options['MIPGap'] = mipgap
+        options['LogFile'] = config.logfile
 
         # Extract the suffixes
-        
+        suffixes = []
 
         # Run Gurobi
-        data = json.dumps(
+        data = pickle.dumps(
             ( config.problemfile,
               config.solnfile,
               { 'warmstart_file': config.warmstart_file,
-                'relax_integrality': mapped_options.relax_integrality, },
-              options,
-              suffixes))
+                'relax_integrality': config.relax_integrality, },
+              options.value(),
+              suffixes), protocol=2)
         timelim = config.timelimit
         if timelim:
             timelim + min(max(1, 0.01*self._timelim), 100)
-        cmd = [ config.executable,
+        cmd = [ str(config.executable),
                 os.path.join(this_file_dir(), 'GUROBI_RUN.py') ]
         try:
+            T.toc("gurobi other preminaries done")
             rc, log = run(cmd, stdin=data, timelimit=timelim, tee=config.tee)
+            T.toc("gurobi subprocess complete")
         except WindowsError:
             raise ApplicationError(
                 'Could not execute the command: %s\tError message: %s'
@@ -154,21 +188,51 @@ class GurobiSolver_LP(GurobiSolver):
 
         # Read in the results
         result_data = None
-        with open(config.solnfile, 'r') as SOLN:
+        with open(config.solnfile, 'rb') as SOLN:
             try:
-                result_data = json.load(SOLN)
+                result_data = pickle.load(SOLN)
             except ValueError:
                 logger.error(
-                    "GurobiSolver_LP: no results data returned from the
-                    Gurobi subprocess.  Look at the solver log for more
-                    details (re-run with 'tee=True' to see the solver log.")
+                    "GurobiSolver_LP: no results data returned from the "
+                    "Gurobi subprocess.  Look at the solver log for more "
+                    "details (re-run with 'tee=True' to see the solver log.")
                 raise
 
+        results = SolverResults()
+
+        #results.problem.update(result_data['problem'])
+        for k,v in iteritems(result_data['problem']):
+            setattr(results.problem, k, v)
+
+        #results.solver.update(result_data['solver'])
+        for k,v in iteritems(result_data['solver']):
+            setattr(results.solver, k, v)
+        results.solver.name = 'gurobi_lp'
+
+        if not config.load_solution:
+            raise RuntimeError("TODO")
+        elif result_data['solution']['points']:
+            _sol = result_data['solution']['points'][0]
+            X = _sol['X']
+            for i, vname in enumerate(_sol['VarName']):
+                v = symbol_map.getObject(vname)
+                v.value = X[i]
+
+        T.toc("gurobi solution load complete")
+        return results
         
-            
 
 if __name__ == '__main__':
-    a = GurobiSolver_LP()
-    a.CONFIG.display()
+    solver = GurobiSolver_LP()
+    from pyomo.environ import *
+    m = ConcreteModel()
+    m.x = Var(bounds=(0,10))
+    m.y = Var(bounds=(0,5))
+    m.con1 = Constraint(expr=2*m.x+m.y <= 5)
+    m.con2 = Constraint(expr=m.x+2*m.y <= 6)
+    m.obj = Objective(expr=m.x+m.y, sense=maximize)
+
+    print solver.solve(m, tee=True)
+    m.pprint()
 
     
