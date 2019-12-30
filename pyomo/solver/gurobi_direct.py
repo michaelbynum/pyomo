@@ -126,8 +126,7 @@ class GurobiDirect(MIPSolver):
     """
     Direct interface to Gurobi
     """
-    CONFIG = Solver.CONFIG()
-    MAPPED_OPTIONS = MIPSolver.MAPPED_OPTIONS()
+    CONFIG = MIPSolver.CONFIG()
 
     CONFIG.declare('symbolic_solver_labels', ConfigValue(default=False, domain=bool,
                                                          doc='If True, the gurobi variable and constraint names '
@@ -158,7 +157,6 @@ class GurobiDirect(MIPSolver):
         self._mutable_coefficients_map = dict()
         self._range_constraints = set()
         self._tmp_config = None
-        self._tmp_mapped_options = None
         self._tmp_options = None
         self._walker = _GurobiWalker(self._pyomo_var_to_solver_var_map)
 
@@ -180,12 +178,13 @@ class GurobiDirect(MIPSolver):
         except self._gurobipy.GurobiError:
             return False
 
-    def solve(self, model, options=None, mapped_options=None, **config_options):
+    def solve(self, model, options=None, **config_options):
         """
         solve a model
         """
-        self._tmp_options = self.options(options)
-        self._tmp_mapped_options = self.mapped_options(mapped_options)
+        if options is None:
+            options = dict()
+        self._tmp_options = self.options(options, preserve_implicit=True)
         self._tmp_config = self.config(config_options)
         if model is self._pyomo_model:
             self._update()
