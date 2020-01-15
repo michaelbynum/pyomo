@@ -10,34 +10,21 @@
 
 import logging
 import re
-import sys
-import pyomo.common
-from pyutilib.misc import Bunch
-from pyutilib.services import TempfileManager
-from pyomo.core.expr.numvalue import is_fixed, value, is_constant
+from pyomo.core.expr.numvalue import value, is_constant
 from pyomo.repn import generate_standard_repn
-from pyomo.solvers.plugins.solvers.direct_solver import DirectSolver
-from pyomo.solvers.plugins.solvers.direct_or_persistent_solver import DirectOrPersistentSolver
 from pyomo.core.kernel.objective import minimize, maximize
 from pyomo.core.kernel.component_set import ComponentSet
-from pyomo.core.kernel.component_map import ComponentMap
 from pyomo.opt.results.results_ import SolverResults
-from pyomo.opt.results.solution import Solution, SolutionStatus
 from pyomo.opt.results.solver import TerminationCondition, SolverStatus
 from pyomo.opt.base import SolverFactory
 from pyomo.core.base.suffix import Suffix
 from pyomo.core.base.var import Var
-from pyomo.core.base.param import Param, _ParamData, SimpleParam
 from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.sos import SOSConstraint
 from pyomo.core.base.objective import Objective
-from pyomo.common.config import ConfigBlock, ConfigValue, add_docstring_list
-from pyomo.solver.base import MIPSolver, Solver
+from pyomo.common.config import ConfigValue, add_docstring_list
+from pyomo.solver.base import MIPSolver, ResultsBase
 from pyomo.core.base import SymbolMap, NumericLabeler, TextLabeler
-from pyomo.core.expr.visitor import StreamBasedExpressionVisitor
-from pyomo.core.expr.numvalue import native_numeric_types, native_types
-import pyomo.core.expr.numeric_expr as numeric_expr
-from pyomo.core.base.expression import _GeneralExpressionData, SimpleExpression
 
 
 logger = logging.getLogger('pyomo.solvers')
@@ -45,6 +32,16 @@ logger = logging.getLogger('pyomo.solvers')
 
 class DegreeError(ValueError):
     pass
+
+
+class GurobiPersistentResults(ResultsBase):
+    def __init__(self, solver):
+        super(GurobiPersistentResults, self).__init__()
+        self._solver = solver
+
+    def load_solution(self, model, solution_number=0):
+        self._solver.setParam('SolutionNumber', solution_number)
+        self._solver.load_vars()
 
 
 def _is_numeric(x):
@@ -133,25 +130,24 @@ class _MutableObjective(object):
     def __init__(self, gurobi_model, constant, linear_coefs, quadratic_coefs):
         self.gurobi_model = gurobi_model
         self.constant = constant
-        self.last_constant_value = value(self.constant.expr)
         self.linear_coefs = linear_coefs
-        self.last_linear_coef_values = [value(i.expr) for i in self.linear_coefs]
         self.quadratic_coefs = quadratic_coefs
         self.last_quadratic_coef_values = [value(i.expr) for i in self.quadratic_coefs]
 
     def get_updated_expression(self):
-        gurobi_expr = self.gurobi_model.getObjective()
-        new_const_value = value(self.constant.expr) - self.last_constant_value
-        gurobi_expr += new_const_value
-        self.last_constant_value = new_const_value
         for ndx, coef in enumerate(self.linear_coefs):
-            new_coef_value = value(coef.expr) - self.last_linear_coef_values[ndx]
-            gurobi_expr += new_coef_value * coef.var
-            self.last_linear_coef_values[ndx] = new_coef_value
+            coef.var.obj = value(coef.expr)
+        self.gurobi_model.ObjCon = value(self.constant.expr)
+
+        gurobi_expr = None
         for ndx, coef in enumerate(self.quadratic_coefs):
-            new_coef_value = value(coef.expr) - self.last_quadratic_coef_values[ndx]
-            gurobi_expr += new_coef_value * coef.var1 * coef.var2
-            self.last_quadratic_coef_values[ndx] = new_coef_value
+            if value(coef.expr) != self.last_quadratic_coef_values[ndx]:
+                if gurobi_expr is None:
+                    self.gurobi_model.update()
+                    gurobi_expr = self.gurobi_model.getObjective()
+                new_coef_value = value(coef.expr) - self.last_quadratic_coef_values[ndx]
+                gurobi_expr += new_coef_value * coef.var1 * coef.var2
+                self.last_quadratic_coef_values[ndx] = new_coef_value
         return gurobi_expr
 
 
@@ -162,8 +158,8 @@ class _MutableQuadraticCoefficient(object):
         self.var2 = None
 
 
-@SolverFactory.register('gurobi_auto', doc='Direct python interface to Gurobi with automatic updates')
-class GurobiAuto(MIPSolver):
+@SolverFactory.register('gurobi_persistent_new', doc='Direct python interface to Gurobi with automatic updates')
+class GurobiPersistentNew(MIPSolver):
     """
     Direct interface to Gurobi
     """
@@ -758,7 +754,7 @@ class GurobiAuto(MIPSolver):
             vars_to_load = self._solver_var_to_pyomo_var_map.values()
 
         gurobi_vars_to_load = [var_map[id(pyomo_var)] for pyomo_var in vars_to_load]
-        vals = self._solver_model.getAttr("X", gurobi_vars_to_load)
+        vals = self._solver_model.getAttr("Xn", gurobi_vars_to_load)
 
         for var, val in zip(vars_to_load, vals):
             if ref_vars[id(var)] > 0:
@@ -844,10 +840,12 @@ class GurobiAuto(MIPSolver):
             slack[pyomo_con] = val
 
     def _update(self):
-        last_solve_vars = ComponentSet(self._solver_var_to_pyomo_var_map.values())
-        current_vars = ComponentSet(v for v in self._pyomo_model.component_data_objects(Var, descend_into=True, sort=True))
-        last_solve_cons = ComponentSet(self._solver_con_to_pyomo_con_map.values())
-        current_cons = ComponentSet(c for c in self._pyomo_model.component_data_objects(Constraint, active=True, descend_into=True, sort=True))
+        if self.config.update_vars:
+            last_solve_vars = ComponentSet(self._solver_var_to_pyomo_var_map.values())
+            current_vars = ComponentSet(v for v in self._pyomo_model.component_data_objects(Var, descend_into=True, sort=True))
+        if self.config.check_for_new_constraints or self.config.check_for_removed_constraints:
+            last_solve_cons = ComponentSet(self._solver_con_to_pyomo_con_map.values())
+            current_cons = ComponentSet(c for c in self._pyomo_model.component_data_objects(Constraint, active=True, descend_into=True, sort=True))
         new_cons = current_cons - last_solve_cons
         old_cons = last_solve_cons - current_cons
         for c in old_cons:
@@ -879,11 +877,12 @@ class GurobiAuto(MIPSolver):
         if pyomo_obj is self._objective and pyomo_obj.expr is self._objective_expr:
             helper = self._mutable_objective
             new_gurobi_expr = helper.get_updated_expression()
-            if pyomo_obj.sense == minimize:
-                sense = self._gurobipy.GRB.MINIMIZE
-            else:
-                sense = self._gurobipy.GRB.MAXIMIZE
-            self._solver_model.setObjective(new_gurobi_expr, sense=sense)
+            if new_gurobi_expr is not None:
+                if pyomo_obj.sense == minimize:
+                    sense = self._gurobipy.GRB.MINIMIZE
+                else:
+                    sense = self._gurobipy.GRB.MAXIMIZE
+                self._solver_model.setObjective(new_gurobi_expr, sense=sense)
         else:
             self._set_objective(pyomo_obj)
 

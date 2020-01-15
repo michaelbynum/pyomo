@@ -12,8 +12,37 @@
 from pyomo.common.config import ConfigBlock, ConfigValue, NonNegativeFloat
 from pyomo.common.errors import DeveloperError
 from pyomo.common.deprecation import deprecated
+import six
+import abc
+import enum
 
-from pyomo.opt.results import SolverResults
+"""
+An enumeration for checking the termination condition of solvers
+
+Attributes:
+    unknown    
+"""
+
+
+class TerminationCondition(enum.Enum):
+    """
+    An enumeration for checking the termination condition of solvers
+    """
+    unknown = 0
+    maxTimeLimit = 1
+    maxIterations = 2
+    minFunctionValue = 3
+    minStepLength = 4
+    optimal = 5
+    feasible = 6
+    maxEvaluations = 7
+    unbounded = 8
+    infeasible = 9
+    infeasibleOrUnbounded = 10
+    error = 11
+    Interrupt = 12
+    licensingProblems = 13
+
 
 class Solver(object):
     """A generic optimization solver"""
@@ -94,3 +123,36 @@ class MIPSolver(Solver):
         domain=bool,
     ))
 
+
+class SolutionLoader(six.with_metaclass(abc.ABCMeta, object)):
+    @abc.abstractmethod
+    def load_solution(self, model):
+        pass
+
+
+class ResultsBase(object):
+    def __init__(self):
+        self._optimal = False
+        self.solution_loader = None
+        self.solver = ConfigBlock()
+        self.solver.declare('termination_condition',
+                            ConfigValue(default=TerminationCondition.unknown))
+        self.solver_info.declare('total_wallclock_time',
+                                 ConfigValue(default=None,
+                                             domain=NonNegativeFloat,
+                                             doc="Total wallclock time spent in the call to solve, including time "
+                                                 "required by Pyomo to process the model and the solution"))
+        self.solver_info.declare('solver_wallclock_time',
+                                 ConfigValue(default=None,
+                                             domain=NonNegativeFloat,
+                                             doc="Wallclock time required by the solver"))
+        self.solver_info.declare('termination_condition')
+
+    @property
+    def optimal(self):
+        return self._optimal
+
+    @optimal.setter
+    def optimal(self, val):
+        assert val in {True, False}
+        self._optimal = val
