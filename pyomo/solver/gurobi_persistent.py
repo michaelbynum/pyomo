@@ -46,6 +46,16 @@ class GurobiPersistentSolutionLoader(SolutionLoaderBase):
         if not self._valid:
             raise RuntimeError('The results in the solver are no longer valid.')
 
+    def load_suffix(self, suffix):
+        if suffix == 'dual':
+            self.load_duals()
+        elif suffix == 'slack':
+            self.load_slacks()
+        elif suffix == 'rc':
+            self.load_reduced_costs()
+        else:
+            raise ValueError('suffix not recognized')
+
     def load_solution(self):
         self._assert_solution_still_valid()
 

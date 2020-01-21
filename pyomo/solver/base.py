@@ -151,6 +151,18 @@ class SolutionLoaderBase(six.with_metaclass(abc.ABCMeta, object)):
         pass
 
     @abc.abstractmethod
+    def load_suffix(self, suffix):
+        """
+        Load the specified suffix into the model.
+
+        Parameters
+        ----------
+        suffix: str
+            The suffix to load. Options typically include 'dual', 'slack', and 'rc', but this is solver-dependent.
+            Please see the documentation for the solver interface of interest.
+        """
+
+    @abc.abstractmethod
     def load_vars(self, vars_to_load=None):
         """
         Load the solution of the primal variables into the value attribut of the variables.
@@ -163,7 +175,6 @@ class SolutionLoaderBase(six.with_metaclass(abc.ABCMeta, object)):
         """
         pass
 
-    @abc.abstractmethod
     def load_duals(self, cons_to_load=None):
         """
         Load the duals into the model.dual suffix. If the model.dual suffix does not exist it will be created.
@@ -174,9 +185,8 @@ class SolutionLoaderBase(six.with_metaclass(abc.ABCMeta, object)):
             A list of the constraints whose duals should be loaded. If cons_to_load is None, then the duals for all
             constraints will be loaded.
         """
-        pass
+        raise NotImplementedError('{0} does not support the load_duals method'.format(type(self)))
 
-    @abc.abstractmethod
     def load_slacks(self, cons_to_load=None):
         """
         Load the slacks into the model.slack suffix. If the model.slack suffix does not exist it will be created.
@@ -187,9 +197,8 @@ class SolutionLoaderBase(six.with_metaclass(abc.ABCMeta, object)):
             A list of the constraints whose slacks should be loaded. If cons_to_load is None, then the slacks for all
             constraints will be loaded.
         """
-        pass
+        raise NotImplementedError('{0} does not support the load_slacks method'.format(type(self)))
 
-    @abc.abstractmethod
     def load_reduced_costs(self, vars_to_load=None):
         """
         Load the reduced costs into the model.rc suffix. If the model.rc suffix does not exist it will be created.
@@ -200,7 +209,7 @@ class SolutionLoaderBase(six.with_metaclass(abc.ABCMeta, object)):
             A list of the variables whose reduced cost should be loaded. If vars_to_load is None, then all reduced costs
             will be loaded.
         """
-        pass
+        raise NotImplementedError('{0} does not support the load_reduced_costs method'.format(type(self)))
 
 
 class SolutionLoader(SolutionLoaderBase):
@@ -239,6 +248,16 @@ class SolutionLoader(SolutionLoaderBase):
         if hasattr(self._model, 'rc'):
             for v, val in self._reduced_costs.items():
                 self._model.rc[v] = val
+
+    def load_suffix(self, suffix):
+        if suffix == 'dual':
+            self.load_duals()
+        elif suffix == 'slack':
+            self.load_slacks()
+        elif suffix == 'rc':
+            self.load_reduced_costs()
+        else:
+            raise ValueError('suffix not recognized')
 
     def load_vars(self, vars_to_load=None):
         if vars_to_load is None:
