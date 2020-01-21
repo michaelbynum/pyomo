@@ -25,7 +25,7 @@ from pyomo.common.config import (
 )
 from pyomo.common.fileutils import Executable, this_file_dir
 from pyomo.common.timing import TicTocTimer
-from pyomo.solver.base import MIPSolver, SolverResults
+from pyomo.solver.base import MIPSolver, Results
 from pyomo.writer.cpxlp import ProblemWriter_cpxlp
 
 from pyomo.opt.base.solvers import SolverFactory
@@ -198,7 +198,7 @@ class GurobiSolver_LP(GurobiSolver):
                     "details (re-run with 'tee=True' to see the solver log.")
                 raise
 
-        results = SolverResults()
+        results = Results()
 
         #results.problem.update(result_data['problem'])
         for k,v in iteritems(result_data['problem']):
@@ -232,7 +232,7 @@ if __name__ == '__main__':
     m.con2 = Constraint(expr=m.x+2*m.y <= 6)
     m.obj = Objective(expr=m.x+m.y, sense=maximize)
 
-    print solver.solve(m, tee=True)
+    print(solver.solve(m, tee=True))
     m.pprint()
 
     

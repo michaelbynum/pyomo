@@ -340,6 +340,7 @@ class ResultsBase(six.with_metaclass(abc.ABCMeta, object)):
                                             "the lower bound. For maximization problems, this is the upper bound."
                                             "For solvers that do not provide an objective bound, this should be -inf "
                                             "(minimization) or inf (maximization)"))
+        self.problem = ConfigBlock()
 
     @abc.abstractmethod
     def found_feasible_solution(self):
