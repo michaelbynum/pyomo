@@ -4,7 +4,7 @@ from pyomo.solver.gurobi_persistent import GurobiPersistentNew
 from pyomo.solver.base import TerminationCondition
 try:
     import gurobipy
-    m = gurobipy.Model()
+    _tmp = gurobipy.Model()
     import numpy as np
     gurobipy_available = True
 except:
@@ -84,3 +84,56 @@ class TestGurobiPersistentSimpleLPUpdates(unittest.TestCase):
         res = opt.solve(self.m)
         self.assertAlmostEqual(x, self.m.x.value)
         self.assertAlmostEqual(y, self.m.y.value)
+
+
+@unittest.skipIf(not gurobipy_available, 'gurobipy is not available')
+class TestGurobiPersistent(unittest.TestCase):
+    def test_range_constraints(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var()
+        m.xl = pyo.Param(initialize=-1, mutable=True)
+        m.xu = pyo.Param(initialize=1, mutable=True)
+        m.c = pyo.Constraint(expr=pyo.inequality(m.xl, m.x, m.xu))
+        m.obj = pyo.Objective(expr=m.x)
+
+        opt = GurobiPersistentNew()
+        opt.set_instance(m)
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -1)
+
+        m.xl.value = -3
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -3)
+
+        del m.obj
+        m.obj = pyo.Objective(expr=m.x, sense=pyo.maximize)
+
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 1)
+
+        m.xu.value = 3
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 3)
+
+    def test_quadratic_constraint_with_params(self):
+        m = pyo.ConcreteModel()
+        m.a = pyo.Param(initialize=1, mutable=True)
+        m.b = pyo.Param(initialize=1, mutable=True)
+        m.c = pyo.Param(initialize=1, mutable=True)
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        m.obj = pyo.Objective(expr=m.y)
+        m.con = pyo.Constraint(expr=m.y >= m.a*m.x**2 + m.b*m.x + m.c)
+
+        opt = GurobiPersistentNew()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(m.y.value, m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
+
+        m.a.value = 2
+        m.b.value = 4
+        m.c.value = -1
+        res = opt.solve(m)
+        print(m.x.value, m.y.value)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(m.y.value, m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)

@@ -133,13 +133,15 @@ class _MutableRangeConstant(object):
         self.lhs_expr = None
         self.rhs_expr = None
         self.con = None
-        self.slack = None
+        self.slack_name = None
+        self.gurobi_model = None
 
     def update(self):
         rhs_val = value(self.rhs_expr)
         lhs_val = value(self.lhs_expr)
         self.con.rhs = rhs_val
-        self.slack.ub = rhs_val - lhs_val
+        slack = self.gurobi_model.getVarByName(self.slack_name)
+        slack.ub = rhs_val - lhs_val
 
 
 class _MutableConstant(object):
@@ -156,7 +158,7 @@ class _MutableQuadraticConstraint(object):
         self.con = gurobi_con
         self.gurobi_model = gurobi_model
         self.constant = constant
-        self.last_constant_value = value(self.constant)
+        self.last_constant_value = value(self.constant.expr)
         self.linear_coefs = linear_coefs
         self.last_linear_coef_values = [value(i.expr) for i in self.linear_coefs]
         self.quadratic_coefs = quadratic_coefs
@@ -449,7 +451,7 @@ class GurobiPersistentNew(MIPSolver):
         self._constraints_added_since_update = set()
         self._vars_added_since_update = ComponentSet()
 
-        if self._tmp_config.symbolic_solver_labels:
+        if self.config.symbolic_solver_labels:
             self._labeler = TextLabeler()
         else:
             self._labeler = NumericLabeler('x')
@@ -556,8 +558,6 @@ class GurobiPersistentNew(MIPSolver):
                     mutable_constant.expr = rhs_expr
                     mutable_constant.con = gurobipy_con
                     self._mutable_helpers[con] = [mutable_constant]
-                else:
-                    self._mutable_helpers[con] = list()
             elif con.has_lb() and con.has_ub():
                 lhs_expr = con.lower - repn_constant
                 rhs_expr = con.upper - repn_constant
@@ -570,10 +570,9 @@ class GurobiPersistentNew(MIPSolver):
                     mutable_range_constant.lhs_expr = lhs_expr
                     mutable_range_constant.rhs_expr = rhs_expr
                     mutable_range_constant.con = gurobipy_con
-                    mutable_range_constant.slack = self._solver_model.getVarByName('Rg'+conname)
+                    mutable_range_constant.slack_name = 'Rg' + conname
+                    mutable_range_constant.gurobi_model = self._solver_model
                     self._mutable_helpers[con] = [mutable_range_constant]
-                else:
-                    self._mutable_helpers[con] = list()
             elif con.has_lb():
                 rhs_expr = con.lower - repn_constant
                 rhs_val = value(rhs_expr)
@@ -583,8 +582,6 @@ class GurobiPersistentNew(MIPSolver):
                     mutable_constant.expr = rhs_expr
                     mutable_constant.con = gurobipy_con
                     self._mutable_helpers[con] = [mutable_constant]
-                else:
-                    self._mutable_helpers[con] = list()
             elif con.has_ub():
                 rhs_expr = con.upper - repn_constant
                 rhs_val = value(rhs_expr)
@@ -594,15 +591,17 @@ class GurobiPersistentNew(MIPSolver):
                     mutable_constant.expr = rhs_expr
                     mutable_constant.con = gurobipy_con
                     self._mutable_helpers[con] = [mutable_constant]
-                else:
-                    self._mutable_helpers[con] = list()
             else:
                 raise ValueError("Constraint does not have a lower "
                                  "or an upper bound: {0} \n".format(con))
             for tmp in mutable_linear_coefficients:
                 tmp.con = gurobipy_con
                 tmp.gurobi_model = self._solver_model
-            self._mutable_helpers[con].extend(mutable_linear_coefficients)
+            if len(mutable_linear_coefficients) > 0:
+                if con not in self._mutable_helpers:
+                    self._mutable_helpers[con] = mutable_linear_coefficients
+                else:
+                    self._mutable_helpers[con].extend(mutable_linear_coefficients)
         elif gurobi_expr.__class__ is self._gurobipy.QuadExpr:
             if con.equality:
                 raise NotImplementedError('Quadratic equality constraints are not supported')
@@ -621,12 +620,14 @@ class GurobiPersistentNew(MIPSolver):
                                  "or an upper bound: {0} \n".format(con))
             if len(mutable_linear_coefficients) > 0 or len(mutable_quadratic_coefficients) > 0 or not is_constant(repn_constant):
                 mutable_constant = _MutableConstant()
-                mutable_constant.expr = repn_constant
+                mutable_constant.expr = rhs_expr
                 mutable_quadratic_constraint = _MutableQuadraticConstraint(self._solver_model, gurobipy_con,
                                                                            mutable_constant,
                                                                            mutable_linear_coefficients,
                                                                            mutable_quadratic_coefficients)
                 self._mutable_quadratic_helpers[con] = mutable_quadratic_constraint
+        else:
+            raise ValueError('Unrecognized Gurobi expression type')
             
         if self.config.update_named_expressions:
             self._named_expressions[con] = list()
@@ -1035,6 +1036,8 @@ class GurobiPersistentNew(MIPSolver):
             slack[pyomo_con] = val
 
     def update(self):
+        if self._needs_updated:
+            self._solver_model.update()
         if self.config.check_for_new_or_removed_vars or self.config.update_vars:
             last_solve_vars = ComponentSet(self._solver_var_to_pyomo_var_map.values())
             current_vars = ComponentSet(v for v in self._pyomo_model.component_data_objects(Var, descend_into=True, sort=True))
@@ -1109,7 +1112,7 @@ class GurobiPersistentNew(MIPSolver):
                 gurobi_con = helper.con
                 new_gurobi_expr = helper.get_updated_expression()
                 new_rhs = helper.get_updated_rhs()
-                new_sense = gurobi_con.sense
+                new_sense = gurobi_con.qcsense
                 pyomo_con = self._solver_con_to_pyomo_con_map[id(gurobi_con)]
                 name = self._symbol_map.getSymbol(pyomo_con, self._labeler)
                 self._solver_model.remove(gurobi_con)
@@ -1122,7 +1125,7 @@ class GurobiPersistentNew(MIPSolver):
         pyomo_obj = _get_objective(self._pyomo_model)
         already_called_set_objective = False
         if not (pyomo_obj is self._objective):
-            self._set_objective(pyomo_obj)
+            self.set_objective(pyomo_obj)
             already_called_set_objective = True
         if (not already_called_set_objective) and (not (pyomo_obj.expr is self._objective_expr)):
             self._set_objective(pyomo_obj)
