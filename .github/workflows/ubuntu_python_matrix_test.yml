@@ -11,45 +11,65 @@ jobs:
     runs-on: ubuntu-18.04
     strategy:
       fail-fast: false
-      max-parallel: 5
       matrix:
-        python-version: [2.7, 3.5, 3.6, 3.7, 3.8]
+        python-version: [3.5, 3.6, 3.7, 3.8]
+
     steps:
     - uses: actions/checkout@v1
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v1
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
+    - name: Install Pyomo dependencies
       run: |
-        export PYTHONWARNINGS="ignore::UserWarning"
         echo "Upgrade pip..."
         python -m pip install --upgrade pip
-        echo "Install extras..."
-        pip install numpy scipy ipython openpyxl sympy pyodbc pyyaml networkx xlrd matplotlib dill
-        pip install pandas # Pandas needs to be installed after its dependencies to work correctly for Python 2.7 
-        pip install seaborn pymysql pyro4 pint pathos 
-        echo "Installing GAMS..."
-        wget -q https://d37drm4t2jghv5.cloudfront.net/distributions/24.8.5/linux/linux_x64_64_sfx.exe
-        chmod +x linux_x64_64_sfx.exe
-        ./linux_x64_64_sfx.exe -q -d gams
-        PATH=$PATH:/gams/gams24.3_linux_x64_64_sfx
-        echo "Cloning Pyomo-model-libraries..."
-        git clone --quiet https://github.com/Pyomo/pyomo-model-libraries.git
-        echo "Installing PyUtilib..."
-        pip install --quiet git+https://github.com/PyUtilib/pyutilib
-        echo "Installing Pyomo..."
-        python setup.py develop
-    - name: Install extensions
+        echo ""
+        echo "Install Pyomo dependencies..."
+        echo ""
+        pip install cython numpy scipy ipython openpyxl sympy pyyaml pyodbc networkx xlrd pandas matplotlib dill seaborn pymysql pyro4 pint pathos
+        echo ""
+        echo "Install CPLEX Community Edition..."
+        echo ""
+        pip install cplex || echo "CPLEX Community Edition is not available for ${{ matrix.python-version }}"
+        echo ""
+        echo "Install GAMS..."
+        echo ""
+        wget -q https://d37drm4t2jghv5.cloudfront.net/distributions/29.1.0/linux/linux_x64_64_sfx.exe -O gams_installer.exe
+        chmod +x gams_installer.exe
+        ./gams_installer.exe -q -d gams
+        cd gams/*/apifiles/Python/
+        py_ver=$(python -c 'import sys;print("%s%s" % sys.version_info[:2])')
+        gams_ver=api
+        for ver in api_*; do
+            if test ${ver:4} -le $py_ver; then
+                gams_ver=$ver
+            fi  
+        done
+        cd $gams_ver
+        python setup.py -q install -noCheck
+    - name: Install Pyomo and extensions
       run: |
-        export PYTHONWARNINGS="ignore::UserWarning"
+        echo "Clone Pyomo-model-libraries..."
+        git clone --quiet https://github.com/Pyomo/pyomo-model-libraries.git
+        echo ""
+        echo "Install PyUtilib..."
+        echo ""
+        pip install --quiet git+https://github.com/PyUtilib/pyutilib
+        echo ""
+        echo "Install Pyomo..."
+        echo ""
+        python setup.py develop
+        echo ""
         echo "Download and install extensions..."
+        echo ""
         pyomo download-extensions
         pyomo build-extensions
     - name: Run nightly tests with test.pyomo
       run: |
-        export PYTHONWARNINGS="ignore::UserWarning"
         echo "Run test.pyomo..."
+        GAMS_DIR=`ls -d1 $(pwd)/gams/*/ | head -1`
+        export PATH=$PATH:$GAMS_DIR
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$GAMS_DIR
         pip install nose
-        KEY_JOB=1
         test.pyomo -v --cat="nightly" pyomo `pwd`/pyomo-model-libraries
