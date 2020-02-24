@@ -239,6 +239,7 @@ class _GurobiWalker(StreamBasedExpressionVisitor):
         if child_type in native_types:
             return False, value(child)
         if child_type is numeric_expr.LinearExpression:
+            self.referenced_vars.update(child.linear_vars)
             return (False, (self._gurobipy.LinExpr(child.linear_coefs,
                                                    [self.var_map[id(i)] for i in child.linear_vars]) +
                             child.constant))

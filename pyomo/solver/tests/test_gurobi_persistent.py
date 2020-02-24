@@ -2,6 +2,7 @@ import pyutilib.th as unittest
 import pyomo.environ as pyo
 from pyomo.solver.gurobi_persistent import GurobiPersistentNew
 from pyomo.solver.base import TerminationCondition
+from pyomo.core.expr.numeric_expr import LinearExpression
 try:
     import gurobipy
     _tmp = gurobipy.Model()
@@ -134,6 +135,127 @@ class TestGurobiPersistent(unittest.TestCase):
         m.b.value = 4
         m.c.value = -1
         res = opt.solve(m)
-        print(m.x.value, m.y.value)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(m.y.value, m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
+
+    def test_quadratic_objective(self):
+        m = pyo.ConcreteModel()
+        m.a = pyo.Param(initialize=1, mutable=True)
+        m.b = pyo.Param(initialize=1, mutable=True)
+        m.c = pyo.Param(initialize=1, mutable=True)
+        m.x = pyo.Var()
+        m.obj = pyo.Objective(expr=m.a*m.x**2 + m.b*m.x + m.c)
+
+        opt = GurobiPersistentNew()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(res.solver.best_feasible_objective,
+                               m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
+
+        m.a.value = 2
+        m.b.value = 4
+        m.c.value = -1
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(res.solver.best_feasible_objective,
+                               m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
+
+    def test_var_bounds(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var(bounds=(-1, 1))
+        m.obj = pyo.Objective(expr=m.x)
+
+        opt = GurobiPersistentNew()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -1)
+
+        m.x.setlb(-3)
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -3)
+
+        del m.obj
+        m.obj = pyo.Objective(expr=m.x, sense=pyo.maximize)
+
+        opt = GurobiPersistentNew()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 1)
+
+        m.x.setub(3)
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 3)
+
+    def test_fixed_var(self):
+        m = pyo.ConcreteModel()
+        m.a = pyo.Param(initialize=1, mutable=True)
+        m.b = pyo.Param(initialize=1, mutable=True)
+        m.c = pyo.Param(initialize=1, mutable=True)
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        m.obj = pyo.Objective(expr=m.y)
+        m.con = pyo.Constraint(expr=m.y >= m.a*m.x**2 + m.b*m.x + m.c)
+
+        m.x.fix(1)
+        opt = GurobiPersistentNew()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 1)
+        self.assertAlmostEqual(m.y.value, 3)
+
+        m.x.value = 2
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 2)
+        self.assertAlmostEqual(m.y.value, 7)
+
+        m.x.unfix()
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
+        self.assertAlmostEqual(m.y.value, m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
+
+
+@unittest.skipIf(not gurobipy_available, 'gurobipy is not available')
+class TestGurobiWalker(unittest.TestCase):
+    def test_linear_expression(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        m.obj = pyo.Objective(expr=m.y)
+        m.c1 = pyo.Constraint(expr=0 <= LinearExpression(constant=-1,
+                                                         linear_coefs=[1, -2],
+                                                         linear_vars=[m.y, m.x]))
+        m.c2 = pyo.Constraint(expr=0 <= LinearExpression(constant=-1,
+                                                         linear_coefs=[1, 2],
+                                                         linear_vars=[m.y, m.x]))
+        opt = GurobiPersistentNew()
+        opt.config.check_for_updated_mutable_params_in_constraints = False
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 0)
+        self.assertAlmostEqual(m.y.value, 1)
+
+    def test_native_types(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        m.p = pyo.Param(initialize=2)
+        m.obj = pyo.Objective(expr=m.y)
+        m.c1 = pyo.Constraint(expr=0 <= 2*(0.5*m.y - m.x - 0.5))
+        m.c2 = pyo.Constraint(expr=0 <= m.y + m.p*m.x - 1)
+        opt = GurobiPersistentNew()
+        opt.config.check_for_updated_mutable_params_in_constraints = False
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 0)
+        self.assertAlmostEqual(m.y.value, 1)
+
+    def test_quadratic(self):
+        m = pyo.ConcreteModel()
+        m.a = pyo.Param(initialize=1)
+        m.b = pyo.Param(initialize=1)
+        m.c = pyo.Param(initialize=1)
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        m.obj = pyo.Objective(expr=m.y)
+        m.con = pyo.Constraint(expr=m.y >= m.a*m.x**2 + m.b*m.x + m.c)
+
+        opt = GurobiPersistentNew()
+        opt.config.check_for_updated_mutable_params_in_constraints = False
+        res = opt.solve(m)
         self.assertAlmostEqual(m.x.value, -m.b.value / (2 * m.a.value))
         self.assertAlmostEqual(m.y.value, m.a.value * m.x.value ** 2 + m.b.value * m.x.value + m.c.value)
