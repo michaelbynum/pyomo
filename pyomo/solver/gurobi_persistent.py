@@ -20,7 +20,8 @@ from pyomo.core.base.var import Var
 from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.sos import SOSConstraint
 from pyomo.core.base.objective import Objective
-from pyomo.common.config import ConfigValue, add_docstring_list, NonNegativeFloat
+from pyomo.common.config import ConfigValue, add_docstring_list, NonNegativeFloat, ConfigBlock
+from pyomo.common.errors import PyomoException
 from pyomo.solver.base import MIPSolver, ResultsBase, SolutionLoaderBase, TerminationCondition
 from pyomo.core.base import SymbolMap, NumericLabeler, TextLabeler
 from pyomo.core.expr.visitor import StreamBasedExpressionVisitor, identify_components
@@ -32,7 +33,32 @@ import collections
 logger = logging.getLogger('pyomo.solvers')
 
 
-class DegreeError(ValueError):
+class ConfigurationError(PyomoException):
+    pass
+
+
+class _ConfigBlockWithTemporaryImmutability(ConfigBlock):
+    def __init__(self, description=None, doc=None, implicit=False, implicit_domain=None, visibility=0):
+        super(_ConfigBlockWithTemporaryImmutability, self).__init__(description=description,
+                                                                    doc=doc,
+                                                                    implicit=implicit,
+                                                                    implicit_domain=implicit_domain,
+                                                                    visibility=visibility)
+        self._immutable_keys = dict()  # dict from key to error message
+
+    def __setitem__(self, key, val):
+        if key in self._immutable_keys:
+            raise ConfigurationError(str(key) + ' ' + self._immutable_keys[key])
+        super(_ConfigBlockWithTemporaryImmutability, self).__setitem__(key, val)
+
+    def __call__(self, **kwargs):
+        res = super(_ConfigBlockWithTemporaryImmutability, self).__call__(**kwargs)
+        assert type(res) is _ConfigBlockWithTemporaryImmutability
+        res._immutable_keys = dict()
+        return res
+
+
+class DegreeError(PyomoException):
     pass
 
 
@@ -268,11 +294,14 @@ class GurobiPersistentNew(MIPSolver):
     """
     Direct interface to Gurobi
     """
-    CONFIG = MIPSolver.CONFIG()
+    CONFIG = _ConfigBlockWithTemporaryImmutability()
+    for k in MIPSolver.CONFIG.iterkeys():
+        CONFIG.declare(k, MIPSolver.CONFIG._data[k])
 
     CONFIG.declare('symbolic_solver_labels', ConfigValue(default=False, domain=bool,
                                                          doc='If True, the gurobi variable and constraint names '
-                                                             'will match those of the pyomo variables and constrains'))
+                                                             'will match those of the pyomo variables and constrains. '
+                                                             'Cannot be changed after set_instance is called.'))
     CONFIG.declare('stream_solver', ConfigValue(default=False, domain=bool,
                                                 doc='If True, show the Gurobi output'))
     CONFIG.declare('load_solutions', ConfigValue(default=True, domain=bool,
@@ -281,30 +310,33 @@ class GurobiPersistentNew(MIPSolver):
     CONFIG.declare('check_for_updated_mutable_params_in_constraints',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will look for constraint coefficients that depend on '
-                                   'mutable parameters, and automatically update the coefficients for each solve.'))
+                                   'mutable parameters, and automatically update the coefficients for each solve. '
+                                   'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_updated_mutable_params_in_objective',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will look for objective coefficients that depend on '
-                                   'mutable parameters, and automatically update the coefficients for each solve.'))
+                                   'mutable parameters, and automatically update the coefficients for each solve. '
+                                   'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_new_or_removed_constraints',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will check for new or removed constraints when '
-                                   'solve is called.'))
+                                   'solve is called. Cannot be changed after set_instance is called.'))
     CONFIG.declare('update_constraints',
                    ConfigValue(default=False, domain=bool,
                                doc='If True, the solver interface will update constraint bounds each '
-                                   'time solve is called.'))
+                                   'time solve is called. Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_new_or_removed_vars',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will check for new or removed vars each time solve '
-                                   'is called.'))
+                                   'is called. Cannot be changed after set_instance is called.'))
     CONFIG.declare('update_vars',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will update variable bounds each time solve '
-                                   'is called'))
+                                   'is called. Cannot be changed after set_instance is called.'))
     CONFIG.declare('update_named_expressions',
                    ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will update Expressions each time solve is called.'))
+                               doc='If True, the solver interface will update Expressions each time solve is called. '
+                                   'Cannot be changed after set_instance is called.'))
 
     __doc__ = add_docstring_list(__doc__, CONFIG)
 
@@ -379,14 +411,17 @@ class GurobiPersistentNew(MIPSolver):
                                'not be imported or because the version of Gurobi being used is less than 7.')
         if self._last_results_object is not None:
             self._last_results_object.solution_loader._valid = False
+
         if options is None:
             options = dict()
         self._tmp_options = self.options(options, preserve_implicit=True)
         self._tmp_config = self.config(config_options)
+
         if model is self._pyomo_model:
             self.update()
         else:
             self.set_instance(model)
+
         self._apply_solver()
         return self._postsolve()
 
@@ -425,7 +460,7 @@ class GurobiPersistentNew(MIPSolver):
 
         self._needs_updated = True
 
-    def set_instance(self, model):
+    def set_instance(self, model, **config_options):
         self._pyomo_model = model
         self._symbol_map = SymbolMap()
         self._labeler = None
@@ -451,6 +486,18 @@ class GurobiPersistentNew(MIPSolver):
         self._obj_named_expressions = list()
         self._constraints_added_since_update = set()
         self._vars_added_since_update = ComponentSet()
+
+        self.config._immutable_keys = dict()
+        self.config.set_value(config_options)
+        msg = 'can only be changed before set_instance is called or through the set_instance method'
+        self.config._immutable_keys['symbolic_solver_labels'] = msg
+        self.config._immutable_keys['check_for_updated_mutable_params_in_constraints'] = msg
+        self.config._immutable_keys['check_for_updated_mutable_params_in_objective'] = msg
+        self.config._immutable_keys['check_for_new_or_removed_constraints'] = msg
+        self.config._immutable_keys['update_constraints'] = msg
+        self.config._immutable_keys['check_for_new_or_removed_vars'] = msg
+        self.config._immutable_keys['update_vars'] = msg
+        self.config._immutable_keys['update_named_expressions'] = msg
 
         if self.config.symbolic_solver_labels:
             self._labeler = TextLabeler()
