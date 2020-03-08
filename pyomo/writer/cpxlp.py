@@ -33,7 +33,9 @@ from pyomo.core.base import (
     SOSConstraint, Objective,
     ComponentMap, is_fixed
 )
-from pyomo.repn import generate_standard_repn
+from pyomo.repn.standard_repn import (
+    NEW_generate_standard_repn as generate_standard_repn,
+)
 
 logger = logging.getLogger('pyomo.core')
 
