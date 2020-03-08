@@ -414,16 +414,18 @@ timer.stop()
 def generate_standard_repn(
     expr, idMap=None, compute_values=True, verbose=False, quadratic=True,
     repn=None):
-    timer.start()
-    if OLD:
-        ans = OLD_generate_standard_repn(
-            expr, idMap, compute_values, verbose, quadratic, repn)
-    else:
-        ans = NEW_generate_standard_repn(
-            expr, idMap, compute_values, verbose, quadratic, repn)
-    dt = timer.stop()
-    if dt > 0.01:
-        sys.stdout.write(str(dt)+" ")
+    try:
+        timer.start()
+        if OLD:
+            ans = OLD_generate_standard_repn(
+                expr, idMap, compute_values, verbose, quadratic, repn)
+        else:
+            ans = NEW_generate_standard_repn(
+                expr, idMap, compute_values, verbose, quadratic, repn)
+    finally:
+        dt = timer.stop()
+    #if dt > 0.01:
+    #    sys.stdout.write(str(dt)+" ")
     return ans
 
 ##-----------------------------------------------------------------------

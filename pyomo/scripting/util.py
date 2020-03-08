@@ -65,6 +65,7 @@ from pyomo.dataportal import DataPortal
 from pyomo.core import *
 from pyomo.core.base import TextLabeler
 import pyomo.core.base
+import pyomo.repn.standard_repn
 
 
 filter_excepthook=False
@@ -482,6 +483,8 @@ def create_model(data):
         if data.options.runtime.report_timing is True:
             total_time = time.time() - write_start_time
             print("      %6.2f seconds required to write file" % total_time)
+            print("             %0.2f seconds generating standard representations" % (pyomo.repn.standard_repn.timer.toc(""),))
+
 
         if (pympler_available is True) and (data.options.runtime.profile_memory >= 2):
             print("")
