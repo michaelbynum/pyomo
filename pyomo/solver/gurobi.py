@@ -79,7 +79,7 @@ class GurobiSolver_LP(GurobiSolver):
         domain=Path(),
     ))
 
-    CONFIG.inherit_from(ProblemWriter_cpxlp.CONFIG, skip={
+    CONFIG.declare_from(ProblemWriter_cpxlp.CONFIG, skip={
         'allow_quadratic_objective', 'allow_quadratic_constraints',
         'allow_sos1', 'allow_sos2'})
 
