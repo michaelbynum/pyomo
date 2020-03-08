@@ -12,7 +12,7 @@ from __future__ import division
 
 __all__ = ['StandardRepn', 'generate_standard_repn']
 
-OLD = False
+OLD = True
 
 import sys
 import logging
