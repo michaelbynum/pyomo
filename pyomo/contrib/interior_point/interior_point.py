@@ -162,7 +162,9 @@ def _fraction_to_the_boundary_helper_lb(tau, x, delta_x, xl_compressed, xl_compr
     delta_x = cm * delta_x
     xl = cm * xl
 
-    alpha = ((1 - tau) * (x - xl) + xl - x) / delta_x
+    #alpha = ((1 - tau) * (x - xl) + xl - x) / delta_x
+    # Why not reduce this?
+    alpha = -tau * (x - xl) / delta_x
     if len(alpha) == 0:
         return 1
     else:
@@ -188,7 +190,8 @@ def _fraction_to_the_boundary_helper_ub(tau, x, delta_x, xu_compressed, xu_compr
     delta_x = cm * delta_x
     xu = cm * xu
 
-    alpha = (xu - (1 - tau) * (xu - x) - x) / delta_x
+    #alpha = (xu - (1 - tau) * (xu - x) - x) / delta_x
+    alpha = tau * (xu - x) / delta_x
     if len(alpha) == 0:
         return 1
     else:
@@ -235,49 +238,59 @@ def fraction_to_the_boundary(interface, tau):
     ineq_lb_compression_matrix = interface.get_ineq_lb_compression_matrix()
     ineq_ub_compression_matrix = interface.get_ineq_ub_compression_matrix()
 
-    alpha_primal_max_a = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                             x=primals,
-                                                             delta_x=delta_primals,
-                                                             xl_compressed=primals_lb_compressed,
-                                                             xl_compression_matrix=primals_lb_compression_matrix)
-    alpha_primal_max_b = _fraction_to_the_boundary_helper_ub(tau=tau,
-                                                             x=primals,
-                                                             delta_x=delta_primals,
-                                                             xu_compressed=primals_ub_compressed,
-                                                             xu_compression_matrix=primals_ub_compression_matrix)
-    alpha_primal_max_c = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                             x=slacks,
-                                                             delta_x=delta_slacks,
-                                                             xl_compressed=ineq_lb_compressed,
-                                                             xl_compression_matrix=ineq_lb_compression_matrix)
-    alpha_primal_max_d = _fraction_to_the_boundary_helper_ub(tau=tau,
-                                                             x=slacks,
-                                                             delta_x=delta_slacks,
-                                                             xu_compressed=ineq_ub_compressed,
-                                                             xu_compression_matrix=ineq_ub_compression_matrix)
-    alpha_primal_max = min(alpha_primal_max_a, alpha_primal_max_b, alpha_primal_max_c, alpha_primal_max_d)
+    alpha_primal_max_a = _fraction_to_the_boundary_helper_lb(
+                          tau=tau,
+                          x=primals,
+                          delta_x=delta_primals,
+                          xl_compressed=primals_lb_compressed,
+                          xl_compression_matrix=primals_lb_compression_matrix)
+    alpha_primal_max_b = _fraction_to_the_boundary_helper_ub(
+                          tau=tau,
+                          x=primals,
+                          delta_x=delta_primals,
+                          xu_compressed=primals_ub_compressed,
+                          xu_compression_matrix=primals_ub_compression_matrix)
+    alpha_primal_max_c = _fraction_to_the_boundary_helper_lb(
+                          tau=tau,
+                          x=slacks,
+                          delta_x=delta_slacks,
+                          xl_compressed=ineq_lb_compressed,
+                          xl_compression_matrix=ineq_lb_compression_matrix)
+    alpha_primal_max_d = _fraction_to_the_boundary_helper_ub(
+                          tau=tau,
+                          x=slacks,
+                          delta_x=delta_slacks,
+                          xu_compressed=ineq_ub_compressed,
+                          xu_compression_matrix=ineq_ub_compression_matrix)
+    alpha_primal_max = min(alpha_primal_max_a, alpha_primal_max_b, 
+                           alpha_primal_max_c, alpha_primal_max_d)
 
-    alpha_dual_max_a = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                           x=duals_primals_lb,
-                                                           delta_x=delta_duals_primals_lb,
-                                                           xl_compressed=np.zeros(len(duals_primals_lb)),
-                                                           xl_compression_matrix=identity(len(duals_primals_lb), format='csr'))
-    alpha_dual_max_b = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                           x=duals_primals_ub,
-                                                           delta_x=delta_duals_primals_ub,
-                                                           xl_compressed=np.zeros(len(duals_primals_ub)),
-                                                           xl_compression_matrix=identity(len(duals_primals_ub), format='csr'))
-    alpha_dual_max_c = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                           x=duals_slacks_lb,
-                                                           delta_x=delta_duals_slacks_lb,
-                                                           xl_compressed=np.zeros(len(duals_slacks_lb)),
-                                                           xl_compression_matrix=identity(len(duals_slacks_lb), format='csr'))
-    alpha_dual_max_d = _fraction_to_the_boundary_helper_lb(tau=tau,
-                                                           x=duals_slacks_ub,
-                                                           delta_x=delta_duals_slacks_ub,
-                                                           xl_compressed=np.zeros(len(duals_slacks_ub)),
-                                                           xl_compression_matrix=identity(len(duals_slacks_ub), format='csr'))
-    alpha_dual_max = min(alpha_dual_max_a, alpha_dual_max_b, alpha_dual_max_c, alpha_dual_max_d)
+    alpha_dual_max_a = _fraction_to_the_boundary_helper_lb(
+                        tau=tau,
+                        x=duals_primals_lb,
+                        delta_x=delta_duals_primals_lb,
+                        xl_compressed=np.zeros(len(duals_primals_lb)),
+                        xl_compression_matrix=identity(len(duals_primals_lb), format='csr'))
+    alpha_dual_max_b = _fraction_to_the_boundary_helper_lb(
+                        tau=tau,
+                        x=duals_primals_ub,
+                        delta_x=delta_duals_primals_ub,
+                        xl_compressed=np.zeros(len(duals_primals_ub)),
+                        xl_compression_matrix=identity(len(duals_primals_ub), format='csr'))
+    alpha_dual_max_c = _fraction_to_the_boundary_helper_lb(
+                        tau=tau,
+                        x=duals_slacks_lb,
+                        delta_x=delta_duals_slacks_lb,
+                        xl_compressed=np.zeros(len(duals_slacks_lb)),
+                        xl_compression_matrix=identity(len(duals_slacks_lb), format='csr'))
+    alpha_dual_max_d = _fraction_to_the_boundary_helper_lb(
+                        tau=tau,
+                        x=duals_slacks_ub,
+                        delta_x=delta_duals_slacks_ub,
+                        xl_compressed=np.zeros(len(duals_slacks_ub)),
+                        xl_compression_matrix=identity(len(duals_slacks_ub), format='csr'))
+    alpha_dual_max = min(alpha_dual_max_a, alpha_dual_max_b, 
+                         alpha_dual_max_c, alpha_dual_max_d)
     
     return alpha_primal_max, alpha_dual_max
 
@@ -325,10 +338,15 @@ def check_convergence(interface, barrier):
                        ineq_ub_compression_matrix.transpose() * duals_slacks_ub)
     eq_resid = interface.evaluate_eq_constraints()
     ineq_resid = interface.evaluate_ineq_constraints() - slacks
-    primals_lb_resid = (primals_lb_compression_matrix * primals - primals_lb_compressed) * duals_primals_lb - barrier
-    primals_ub_resid = (primals_ub_compressed - primals_ub_compression_matrix * primals) * duals_primals_ub - barrier
-    slacks_lb_resid = (ineq_lb_compression_matrix * slacks - ineq_lb_compressed) * duals_slacks_lb - barrier
-    slacks_ub_resid = (ineq_ub_compressed - ineq_ub_compression_matrix * slacks) * duals_slacks_ub - barrier
+    primals_lb_resid = (primals_lb_compression_matrix * primals - 
+                        primals_lb_compressed) * duals_primals_lb - barrier
+    primals_ub_resid = (primals_ub_compressed - 
+                        primals_ub_compression_matrix * primals) * \
+                        duals_primals_ub - barrier
+    slacks_lb_resid = (ineq_lb_compression_matrix * slacks - ineq_lb_compressed) * 
+                       duals_slacks_lb - barrier
+    slacks_ub_resid = (ineq_ub_compressed - ineq_ub_compression_matrix * slacks) * 
+                       duals_slacks_ub - barrier
 
     if eq_resid.size == 0:
         max_eq_resid = 0
@@ -363,6 +381,7 @@ def check_convergence(interface, barrier):
         max_slacks_ub_resid = 0
     else:
         max_slacks_ub_resid = np.max(np.abs(slacks_ub_resid))
-    complimentarity_inf = max(max_primals_lb_resid, max_primals_ub_resid, max_slacks_lb_resid, max_slacks_ub_resid)
+    complimentarity_inf = max(max_primals_lb_resid, max_primals_ub_resid, 
+                              max_slacks_lb_resid, max_slacks_ub_resid)
 
     return primal_inf, dual_inf, complimentarity_inf
