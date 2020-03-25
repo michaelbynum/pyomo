@@ -6,7 +6,7 @@ import logging
 import time
 
 
-logger = logging.getLogger('interior_point')
+ip_logger = logging.getLogger('interior_point')
 
 
 def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
@@ -47,7 +47,7 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
     alpha_primal_max = 1
     alpha_dual_max = 1
 
-    logger.info('{_iter:<10}{objective:<15}{primal_inf:<15}{dual_inf:<15}{compl_inf:<15}{barrier:<15}{alpha_p:<15}{alpha_d:<15}{time:<20}'.format(_iter='Iter',
+    ip_logger.info('{_iter:<10}{objective:<15}{primal_inf:<15}{dual_inf:<15}{compl_inf:<15}{barrier:<15}{alpha_p:<15}{alpha_d:<15}{time:<20}'.format(_iter='Iter',
                                     objective='Objective',
                                     primal_inf='Primal Inf',
                                     dual_inf='Dual Inf',
@@ -56,6 +56,9 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
                                     alpha_p='Prim Step Size',
                                     alpha_d='Dual Step Size',
                                     time='Elapsed Time (s)'))
+
+    # Write header line to linear solver log
+    linear_solver.log_header()
 
     for _iter in range(max_iter):
         interface.set_primals(primals)
@@ -70,7 +73,7 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
         primal_inf, dual_inf, complimentarity_inf = \
                 check_convergence(interface=interface, barrier=0)
         objective = interface.evaluate_objective()
-        logger.info('{_iter:<10}{objective:<15.3e}{primal_inf:<15.3e}{dual_inf:<15.3e}{compl_inf:<15.3e}{barrier:<15.3e}{alpha_p:<15.3e}{alpha_d:<15.3e}{time:<20.2e}'.format(_iter=_iter,
+        ip_logger.info('{_iter:<10}{objective:<15.3e}{primal_inf:<15.3e}{dual_inf:<15.3e}{compl_inf:<15.3e}{barrier:<15.3e}{alpha_p:<15.3e}{alpha_d:<15.3e}{time:<20.2e}'.format(_iter=_iter,
                                            objective=objective,
                                            primal_inf=primal_inf,
                                            dual_inf=dual_inf,
@@ -97,6 +100,9 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
         linear_solver.do_symbolic_factorization(kkt)
         linear_solver.do_numeric_factorization(kkt)
         delta = linear_solver.do_back_solve(rhs)
+
+        # Log some relevant info from linear solver
+        linear_solver.log_info(_iter)
 
         interface.set_primal_dual_kkt_solution(delta)
         alpha_primal_max, alpha_dual_max = \
