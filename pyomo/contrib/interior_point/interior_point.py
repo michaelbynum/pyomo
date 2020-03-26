@@ -9,7 +9,8 @@ import time
 ip_logger = logging.getLogger('interior_point')
 
 
-def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
+def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8,
+                         allow_reallocation=False):
     """
     Parameters
     ----------
@@ -57,6 +58,9 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
                                     alpha_d='Dual Step Size',
                                     time='Elapsed Time (s)'))
 
+    # Set necessary options in linear solver
+    linear_solver.allow_reallocation = allow_reallocation
+
     # Write header line to linear solver log
     linear_solver.log_header()
 
@@ -97,7 +101,11 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8):
         interface.set_barrier_parameter(barrier_parameter)
         kkt = interface.evaluate_primal_dual_kkt_matrix()
         rhs = interface.evaluate_primal_dual_kkt_rhs()
+
         linear_solver.do_symbolic_factorization(kkt)
+
+        # Wrap numeric factorization in try/except to check for null-pivot
+        # error.
         linear_solver.do_numeric_factorization(kkt)
         delta = linear_solver.do_back_solve(rhs)
 

@@ -7,7 +7,7 @@ import logging
 
 class MumpsInterface(LinearSolverInterface):
     def __init__(self, par=1, comm=None, cntl_options=None, icntl_options=None,
-                 log_filename=None):
+                 log_filename=None, allow_reallocation=False):
         self._mumps = MumpsCentralizedAssembledLinearSolver(sym=2,
                                                             par=par,
                                                             comm=comm)
@@ -30,20 +30,28 @@ class MumpsInterface(LinearSolverInterface):
 
         self._dim = None
 
+        self.logger = logging.getLogger('mumps')
+        self.logger.propagate = False
         if log_filename:
             self.log_switch = True 
             open(log_filename, 'w').close()
-            self.logger = logging.getLogger('mumps')
             self.logger.setLevel(logging.DEBUG)
 
             fh = logging.FileHandler(log_filename)
             fh.setLevel(logging.DEBUG)
             self.logger.addHandler(fh)
-            self.logger.propagate = False
             # Now logger will not propagate to the root logger.
             # This is probably bad because I might want to 
             # propagate ERROR to the console, but I can't figure
             # out how to disable console logging otherwise
+
+        self.allow_reallocation = allow_reallocation
+        self._prev_allocation = None
+        # Max number of reallocations per iteration:
+        self.max_num_realloc = 2
+        # TODO: Should probably set more reallocation options here,
+        #       and allow the user to specify them.
+        #       (e.g. max memory usage)
 
     def do_symbolic_factorization(self, matrix):
         if not isspmatrix_coo(matrix):
@@ -51,13 +59,61 @@ class MumpsInterface(LinearSolverInterface):
         matrix = tril(matrix)
         nrows, ncols = matrix.shape
         self._dim = nrows
+
         self._mumps.do_symbolic_factorization(matrix)
+        self._prev_allocation = self.get_infog(16)
 
     def do_numeric_factorization(self, matrix):
         if not isspmatrix_coo(matrix):
             matrix = matrix.tocoo()
         matrix = tril(matrix)
-        self._mumps.do_numeric_factorization(matrix)
+
+        if not self.allow_reallocation:
+            self._mumps.do_numeric_factorization(matrix)
+        else:
+            success = False
+            for count in range(self.max_num_realloc):
+                try:
+                    self._mumps.do_numeric_factorization(matrix)
+                    success = True
+                    break
+                except RuntimeError as err:
+                    # What is the proper error to indicate that numeric
+                    # factorization needs reallocation?
+                    msg = str(err)
+                    if ('MUMPS error: -9' not in msg and 
+                        'MUMPS error: -8' not in msg):
+                        raise
+
+                    status = self.get_infog(1)
+                    if status != -8 and status != -9:
+                        raise
+
+                    # Increase the amount of memory allocated to this
+                    # factorization.
+                    new_allocation = self.increase_memory_allocation()
+
+                    # Should probably handle propagation with a context manager
+                    self.logger.propagate = True
+                    self.logger.info(
+                            'Reallocating memory for MUMPS Linear Solver. '
+                            'New memory allocation is ' + str(new_allocation)
+                            + ' MB.')
+                    self.logger.propagate = False
+                    
+            if not success:
+                raise RuntimeError(
+                        'Maximum number of reallocations exceeded in the '
+                        'numeric factorization.')
+
+    def increase_memory_allocation(self):
+        new_allocation = 2*self._prev_allocation
+        self._prev_allocation = new_allocation
+
+        # Here I set the memory allocation directly instead of increasing
+        # the "percent-increase-from-predicted" parameter ICNTL(14)
+        self.set_icntl(23, new_allocation)
+        return new_allocation
 
     def do_back_solve(self, rhs):
         return self._mumps.do_back_solve(rhs)
