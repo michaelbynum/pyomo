@@ -38,6 +38,9 @@ class ConfigurationError(PyomoException):
 
 
 class _ConfigBlockWithTemporaryImmutability(ConfigBlock):
+    __slots__ = ('_immutable_keys',)
+    ConfigBlock._all_slots = ConfigBlock._all_slots + ('_immutable_keys',)
+    
     def __init__(self, description=None, doc=None, implicit=False, implicit_domain=None, visibility=0):
         super(_ConfigBlockWithTemporaryImmutability, self).__init__(description=description,
                                                                     doc=doc,
