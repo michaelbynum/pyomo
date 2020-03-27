@@ -105,8 +105,20 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8,
         linear_solver.do_symbolic_factorization(kkt)
 
         # Wrap numeric factorization in try/except to check for null-pivot
-        # error.
-        linear_solver.do_numeric_factorization(kkt)
+        # error:
+        try:
+            linear_solver.do_numeric_factorization(kkt)
+        except RuntimeError as err:
+            if 'MUMPS error: -10' not in str(err):
+                raise
+            status = linear_solver.get_info(1)
+            if status != -10:
+                raise
+            ip_logger.info(
+                'KKT matrix is numerically singular. '
+                'TODO: perform regularization.')
+            raise
+
         delta = linear_solver.do_back_solve(rhs)
 
         # Log some relevant info from linear solver
