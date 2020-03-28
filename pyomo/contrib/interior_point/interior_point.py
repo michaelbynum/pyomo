@@ -10,7 +10,8 @@ ip_logger = logging.getLogger('interior_point')
 
 
 def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8,
-                         allow_reallocation=False):
+                         allow_reallocation=False,
+                         regularize_kkt=False):
     """
     Parameters
     ----------
@@ -57,6 +58,10 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8,
                                     alpha_p='Prim Step Size',
                                     alpha_d='Dual Step Size',
                                     time='Elapsed Time (s)'))
+    
+    # TODO: Give user option to set regularization parameters
+    max_reg_coef = 1e10
+    reg_factor_increase = 100
 
     # Set necessary options in linear solver
     linear_solver.allow_reallocation = allow_reallocation
@@ -102,22 +107,90 @@ def solve_interior_point(interface, linear_solver, max_iter=100, tol=1e-8,
         kkt = interface.evaluate_primal_dual_kkt_matrix()
         rhs = interface.evaluate_primal_dual_kkt_rhs()
 
-        linear_solver.do_symbolic_factorization(kkt)
+        # Start each iteration without regularization. This may change.
+        eq_grad_regularized = False
 
-        # Wrap numeric factorization in try/except to check for null-pivot
+        # This should probably be extracted into a factorize_with_regularization
+        # function.
+        # Wrap factorization in try/except to check for null-pivot
         # error:
         try:
+            linear_solver.do_symbolic_factorization(kkt)
             linear_solver.do_numeric_factorization(kkt)
         except RuntimeError as err:
-            if 'MUMPS error: -10' not in str(err):
+            if not regularize_kkt:
+                raise
+
+            # -6: Structural singularity in symbolic factorization
+            # -10: Singularity in numeric factorization
+            # Probably should do different things for these errors
+            # eventually (Struct. sing. => "permentant" reg. coef.)
+            # TODO: Add logic to detect and handle incorrect inertia, not
+            # just singularity. "finally" clause?
+            if ('MUMPS error: -10' not in str(err) and 
+               'MUMPS error: -6' not in str(err)):
                 raise
             status = linear_solver.get_info(1)
-            if status != -10:
+            if status != -10 and status != -6:
                 raise
-            ip_logger.info(
-                'KKT matrix is numerically singular. '
-                'TODO: perform regularization.')
-            raise
+
+            # Automatically add constant eq_grad regularization to a singular
+            # matrix.
+            # Assume this regularization will be sufficient
+            if not eq_grad_regularized:
+                ip_logger.info(
+                    ' KKT matrix is numerically singular. '
+                    'Regularizing...')
+                reg_kkt_1 = interface.regularize_equality_gradient(kkt)
+                eq_grad_regularized = True
+                
+            # Here log info from the previous (failed) solve
+            linear_solver.log_info(_iter, include_error=False)
+
+            linear_solver.logger.info(' Entering regularization')
+            linear_solver.log_header(include_error=False, extra_fields=['Coefficient'])
+
+            reg_coef = 1
+            while reg_coef <= max_reg_coef:
+                # Construct new regularized KKT matrix
+                reg_kkt_2 = interface.regularize_hessian(reg_kkt_1, reg_coef)
+
+                # Try factorization again:
+                # If struct. sing., why does this sometimes give 
+                # RuntimeError and sometimes fail in MUMPS?
+                try:
+                    linear_solver.do_symbolic_factorization(reg_kkt_2)
+                    linear_solver.do_numeric_factorization(reg_kkt_2)
+                    # Log info if the solve was successful, so I can see what
+                    # regularization coefficient was necessary.
+                    linear_solver.log_info(_iter, include_error=False, 
+                                           extra_fields=[reg_coef])
+                    break
+                except RuntimeError as err:
+                    if ('MUMPS error: -10' not in str(err) and 
+                       'MUMPS error: -6' not in str(err)):
+                        raise
+                    status = linear_solver.get_info(1)
+                    if status != -10 and status != -6:
+                        raise
+                    # Log info if the solve failed, before regularization
+                    # coefficient gets updated
+                    linear_solver.log_info(_iter, include_error=False, 
+                                           extra_fields=[reg_coef])
+                    reg_coef = reg_factor_increase * reg_coef
+
+            if reg_coef > max_reg_coef:
+                raise RuntimeError(
+                    'Regularization coefficient has exceeded maximum. '
+                    'At this point IPOPT would enter feasibility restoration.')
+
+            linear_solver.logger.info('Exiting regularization')
+
+                # Should log info about regularization:
+                #   - coefficients, number of attempts
+                #   - inertia
+                #   - null pivot tolerance
+                #   - "how far" the factorization got before failing
 
         delta = linear_solver.do_back_solve(rhs)
 
@@ -332,7 +405,7 @@ def fraction_to_the_boundary(interface, tau):
                         xl_compressed=np.zeros(len(duals_slacks_ub)),
                         xl_compression_matrix=identity(len(duals_slacks_ub), 
                                                        format='csr'))
-    alpha_dual_max = min(alpha_dual_max_a, alpha_dual_max_b, 
+    alpha_dual_max = min(alpha_dual_max_a, alpha_dual_max_b,
                          alpha_dual_max_c, alpha_dual_max_d)
     
     return alpha_primal_max, alpha_dual_max

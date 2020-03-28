@@ -168,14 +168,17 @@ class MumpsInterface(LinearSolverInterface):
     def get_rinfog(self, key):
         return self._mumps.get_rinfog(key)
 
-    def log_header(self):
+    def log_header(self, include_error=True, extra_fields=[]):
         header_fields = []
         header_fields.append('Iter')
         header_fields.append('Status')
         header_fields.append('n_null')
         header_fields.append('n_neg')
 
-        header_fields.extend(self.get_error_info().keys())
+        if include_error:
+            header_fields.extend(self.get_error_info().keys())
+
+        header_fields.extend(extra_fields)
 
         # Allocate 10 spaces for integer values
         header_string = '{0:<10}'
@@ -189,13 +192,16 @@ class MumpsInterface(LinearSolverInterface):
 
         self.logger.debug(header_string.format(*header_fields))
 
-    def log_info(self, iter_no):
+    def log_info(self, iter_no, include_error=True, extra_fields=[]):
         fields = [iter_no]
         fields.append(self.get_infog(1))   # Status, 0 for success
         fields.append(self.get_infog(28))  # Number of null pivots
         fields.append(self.get_infog(12))  # Number of negative pivots
 
-        fields.extend(self.get_error_info().values())
+        if include_error:
+            fields.extend(self.get_error_info().values())
+
+        fields.extend(extra_fields)
 
         # Allocate 10 spaces for integer values
         log_string = '{0:<10}'
