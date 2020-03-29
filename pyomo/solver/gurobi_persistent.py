@@ -20,14 +20,16 @@ from pyomo.core.base.var import Var
 from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.sos import SOSConstraint
 from pyomo.core.base.objective import Objective
-from pyomo.common.config import ConfigValue, add_docstring_list, NonNegativeFloat, ConfigBlock
+from pyomo.common.config import ConfigValue, add_docstring_list, NonNegativeFloat
+from pyutilib.misc.config import ImmutableConfigValue
 from pyomo.common.errors import PyomoException
 from pyomo.solver.base import MIPSolver, ResultsBase, SolutionLoaderBase, TerminationCondition
 from pyomo.core.base import SymbolMap, NumericLabeler, TextLabeler
-from pyomo.core.expr.visitor import StreamBasedExpressionVisitor, identify_components
+from pyomo.core.expr.visitor import StreamBasedExpressionVisitor, identify_components, identify_variables
 import pyomo.core.expr.numeric_expr as numeric_expr
 from pyomo.core.base.expression import SimpleExpression, _GeneralExpressionData
 import collections
+from pyomo.common.ordered_set import OrderedDict, OrderedSet
 
 
 logger = logging.getLogger('pyomo.solvers')
@@ -35,30 +37,6 @@ logger = logging.getLogger('pyomo.solvers')
 
 class ConfigurationError(PyomoException):
     pass
-
-
-class _ConfigBlockWithTemporaryImmutability(ConfigBlock):
-    __slots__ = ('_immutable_keys',)
-    ConfigBlock._all_slots = ConfigBlock._all_slots + ('_immutable_keys',)
-    
-    def __init__(self, description=None, doc=None, implicit=False, implicit_domain=None, visibility=0):
-        super(_ConfigBlockWithTemporaryImmutability, self).__init__(description=description,
-                                                                    doc=doc,
-                                                                    implicit=implicit,
-                                                                    implicit_domain=implicit_domain,
-                                                                    visibility=visibility)
-        self._immutable_keys = dict()  # dict from key to error message
-
-    def __setitem__(self, key, val):
-        if key in self._immutable_keys:
-            raise ConfigurationError(str(key) + ' ' + self._immutable_keys[key])
-        super(_ConfigBlockWithTemporaryImmutability, self).__setitem__(key, val)
-
-    def __call__(self, **kwargs):
-        res = super(_ConfigBlockWithTemporaryImmutability, self).__call__(**kwargs)
-        assert type(res) is _ConfigBlockWithTemporaryImmutability
-        res._immutable_keys = dict()
-        return res
 
 
 class DegreeError(PyomoException):
@@ -274,13 +252,11 @@ class _GurobiWalker(StreamBasedExpressionVisitor):
                             child.constant))
         if child.is_expression_type():
             return True, None
-        if child.is_constant():
+        if child.is_fixed():  # we use is_fixed rather than is_constant in order to keep the same behavior as generate_standard_repn
             return False, value(child)
         if child.is_variable_type():
             self.referenced_vars.add(child)
             return False, self.var_map[id(child)]
-        if child.is_parameter_type():
-            return False, value(child)
         return True, None
 
     def exitNode(self, node, data):
@@ -297,49 +273,65 @@ class GurobiPersistentNew(MIPSolver):
     """
     Direct interface to Gurobi
     """
-    CONFIG = _ConfigBlockWithTemporaryImmutability()
-    for k in MIPSolver.CONFIG.iterkeys():
-        CONFIG.declare(k, MIPSolver.CONFIG._data[k])
+    CONFIG = MIPSolver.CONFIG()
 
-    CONFIG.declare('symbolic_solver_labels', ConfigValue(default=False, domain=bool,
-                                                         doc='If True, the gurobi variable and constraint names '
-                                                             'will match those of the pyomo variables and constrains. '
-                                                             'Cannot be changed after set_instance is called.'))
+    CONFIG.declare('symbolic_solver_labels', ImmutableConfigValue(default=False, domain=bool,
+                                                                  doc='If True, the gurobi variable and constraint names '
+                                                                      'will match those of the pyomo variables and constrains. '
+                                                                      'Cannot be changed after set_instance is called.'))
     CONFIG.declare('stream_solver', ConfigValue(default=False, domain=bool,
                                                 doc='If True, show the Gurobi output'))
     CONFIG.declare('load_solutions', ConfigValue(default=True, domain=bool,
                                                  doc='If True, load the solution back into the Pyomo model after '
                                                      'solving'))
     CONFIG.declare('check_for_updated_mutable_params_in_constraints',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will look for constraint coefficients that depend on '
-                                   'mutable parameters, and automatically update the coefficients for each solve. '
-                                   'Cannot be changed after set_instance is called.'))
+                   ImmutableConfigValue(default=True, domain=bool,
+                                        doc='If True, the solver interface will look for constraint coefficients that depend on '
+                                            'mutable parameters, and automatically update the coefficients for each solve. '
+                                            'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_updated_mutable_params_in_objective',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will look for objective coefficients that depend on '
-                                   'mutable parameters, and automatically update the coefficients for each solve. '
-                                   'Cannot be changed after set_instance is called.'))
+                   ImmutableConfigValue(default=True, domain=bool,
+                                        doc='If True, the solver interface will look for objective coefficients that depend on '
+                                            'mutable parameters, and automatically update the coefficients for each solve. '
+                                            'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_new_or_removed_constraints',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will check for new or removed constraints when '
-                                   'solve is called. Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will check '
+                                   'for new or removed constraints when '
+                                   'solve is called.'))
     CONFIG.declare('update_constraints',
-                   ConfigValue(default=False, domain=bool,
-                               doc='If True, the solver interface will update constraint bounds each '
-                                   'time solve is called. Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=False,
+                               domain=bool,
+                               doc='If True, the solver interface will update '
+                                   'constraint bounds each time solve is called.'))
     CONFIG.declare('check_for_new_or_removed_vars',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will check for new or removed vars each time solve '
-                                   'is called. Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will check '
+                                   'for new or removed vars each time solve is called.'))
     CONFIG.declare('update_vars',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will update variable bounds each time solve '
-                                   'is called. Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will update '
+                                   'variable bounds each time solve is called.'))
     CONFIG.declare('update_named_expressions',
-                   ConfigValue(default=True, domain=bool,
-                               doc='If True, the solver interface will update Expressions each time solve is called. '
-                                   'Cannot be changed after set_instance is called.'))
+                   ImmutableConfigValue(default=True,
+                                        domain=bool,
+                                        doc='If True, the solver interface will update '
+                                            'Expressions each time solve is called. '
+                                            'Cannot be changed after set_instance is called.'))
+    CONFIG.declare('check_for_fixed_vars',
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will check for fixed '
+                                   'variables in each constraint that is added. If '
+                                   'The variable is fixed when the constraint gets '
+                                   'added and is later unfixed, the constraints will be '
+                                   'updated accordingly. If check_for_fixed_vars is False '
+                                   'and a variable is fixed when adding a constraint, the '
+                                   'constraint will not be updated correctly when the '
+                                   'variable is unfixed.'))
 
     __doc__ = add_docstring_list(__doc__, CONFIG)
 
@@ -350,36 +342,38 @@ class GurobiPersistentNew(MIPSolver):
         self._solver_model = None
         self._symbol_map = SymbolMap()
         self._labeler = None
-        self._pyomo_var_to_solver_var_map = dict()
-        self._solver_var_to_pyomo_var_map = dict()
-        self._pyomo_con_to_solver_con_map = dict()
-        self._solver_con_to_pyomo_con_map = dict()
-        self._pyomo_sos_to_solver_sos_map = dict()
-        self._solver_sos_to_pyomo_sos_map = dict()
-        self._vars_referenced_by_con = dict()
-        self._vars_referenced_by_obj = dict()
+        self._pyomo_var_to_solver_var_map = OrderedDict()
+        self._solver_var_to_pyomo_var_map = OrderedDict()
+        self._pyomo_con_to_solver_con_map = OrderedDict()
+        self._solver_con_to_pyomo_con_map = OrderedDict()
+        self._pyomo_sos_to_solver_sos_map = OrderedDict()
+        self._solver_sos_to_pyomo_sos_map = OrderedDict()
+        self._vars_referenced_by_con = OrderedDict()
+        self._vars_referenced_by_obj = OrderedDict()
         self._objective = None
         self._objective_expr = None
-        self._referenced_variables = dict()
-        self._referenced_params = dict()
-        self._range_constraints = set()
+        self._referenced_variables = OrderedDict()
+        self._referenced_params = OrderedDict()
+        self._range_constraints = OrderedSet()
         self._tmp_config = None
         self._tmp_options = None
-        self._mutable_helpers = dict()
-        self._mutable_quadratic_helpers = dict()
+        self._mutable_helpers = OrderedDict()
+        self._mutable_quadratic_helpers = OrderedDict()
         self._mutable_objective = None
         self._last_results_object = None
         self._walker = _GurobiWalker(self._pyomo_var_to_solver_var_map)
-        self._constraint_bodies = dict()
-        self._constraint_lowers = dict()
-        self._constraint_uppers = dict()
-        self._named_expressions = dict()
+        self._constraint_bodies = OrderedDict()
+        self._constraint_lowers = OrderedDict()
+        self._constraint_uppers = OrderedDict()
+        self._named_expressions = OrderedDict()
         self._obj_named_expressions = list()
         self._needs_updated = True
         self._callback = None
         self._callback_func = None
-        self._constraints_added_since_update = set()
+        self._constraints_added_since_update = OrderedSet()
         self._vars_added_since_update = ComponentSet()
+        self._fixed_vars_to_dependent_cons_map = OrderedDict()  # pyomo var to set of constraints that were added when the var was fixed
+        self._cons_with_fixed_vars = OrderedDict()  # pyomo constraint to ComponentSet of fixed vars in the constraint when it was added
 
         try:
             import gurobipy
@@ -467,40 +461,41 @@ class GurobiPersistentNew(MIPSolver):
         self._pyomo_model = model
         self._symbol_map = SymbolMap()
         self._labeler = None
-        self._pyomo_var_to_solver_var_map = dict()
-        self._solver_var_to_pyomo_var_map = dict()
-        self._pyomo_con_to_solver_con_map = dict()
-        self._solver_con_to_pyomo_con_map = dict()
-        self._pyomo_sos_to_solver_sos_map = dict()
-        self._solver_sos_to_pyomo_sos_map = dict()
-        self._vars_referenced_by_con = dict()
-        self._vars_referenced_by_obj = dict()
+        self._pyomo_var_to_solver_var_map = OrderedDict()
+        self._solver_var_to_pyomo_var_map = OrderedDict()
+        self._pyomo_con_to_solver_con_map = OrderedDict()
+        self._solver_con_to_pyomo_con_map = OrderedDict()
+        self._pyomo_sos_to_solver_sos_map = OrderedDict()
+        self._solver_sos_to_pyomo_sos_map = OrderedDict()
+        self._vars_referenced_by_con = OrderedDict()
+        self._vars_referenced_by_obj = OrderedDict()
         self._objective = None
-        self._referenced_variables = dict()
-        self._range_constraints = set()
-        self._mutable_helpers = dict()
-        self._mutable_quadratic_helpers = dict()
+        self._referenced_variables = OrderedDict()
+        self._range_constraints = OrderedSet()
+        self._mutable_helpers = OrderedDict()
+        self._mutable_quadratic_helpers = OrderedDict()
         self._last_results_object = None
         self._walker = _GurobiWalker(self._pyomo_var_to_solver_var_map)
-        self._constraint_bodies = dict()
-        self._constraint_lowers = dict()
-        self._constraint_uppers = dict()
-        self._named_expressions = dict()
+        self._constraint_bodies = OrderedDict()
+        self._constraint_lowers = OrderedDict()
+        self._constraint_uppers = OrderedDict()
+        self._named_expressions = OrderedDict()
         self._obj_named_expressions = list()
-        self._constraints_added_since_update = set()
+        self._constraints_added_since_update = OrderedSet()
         self._vars_added_since_update = ComponentSet()
+        self._fixed_vars_to_dependent_cons_map = OrderedDict()  # pyomo var to set of constraints that were added when the var was fixed
+        self._cons_with_fixed_vars = OrderedDict()  # pyomo constraint to ComponentSet of fixed vars in the constraint when it was added
 
-        self.config._immutable_keys = dict()
         self.config.set_value(config_options)
-        msg = 'can only be changed before set_instance is called or through the set_instance method'
-        self.config._immutable_keys['symbolic_solver_labels'] = msg
-        self.config._immutable_keys['check_for_updated_mutable_params_in_constraints'] = msg
-        self.config._immutable_keys['check_for_updated_mutable_params_in_objective'] = msg
-        self.config._immutable_keys['check_for_new_or_removed_constraints'] = msg
-        self.config._immutable_keys['update_constraints'] = msg
-        self.config._immutable_keys['check_for_new_or_removed_vars'] = msg
-        self.config._immutable_keys['update_vars'] = msg
-        self.config._immutable_keys['update_named_expressions'] = msg
+        msg = ' can only be changed before set_instance is called or through the set_instance method'
+        self.config.get('symbolic_solver_labels')._mutable = False
+        self.config.get('symbolic_solver_labels')._immutable_error_message = 'symbolic_solver_labels' + msg
+        self.config.get('check_for_updated_mutable_params_in_constraints')._mutable = False
+        self.config.get('check_for_updated_mutable_params_in_constraints')._immutable_error_message = 'check_for_updated_mutable_params_in_constraints' + msg
+        self.config.get('check_for_updated_mutable_params_in_objective')._mutable = False
+        self.config.get('check_for_updated_mutable_params_in_objective')._immutable_error_message = 'check_for_updated_mutable_params_in_objective' + msg
+        self.config.get('update_named_expressions')._mutable = False
+        self.config.get('update_named_expressions')._immutable_error_message = 'update_named_expressions' + msg
 
         if self.config.symbolic_solver_labels:
             self._labeler = TextLabeler()
@@ -593,8 +588,6 @@ class GurobiPersistentNew(MIPSolver):
             gurobi_expr = self._walker.walk_expression(con.body)
             referenced_vars = self._walker.referenced_vars
             repn_constant = 0
-            mutable_linear_coefficients = list()
-            mutable_quadratic_coefficients = list()
 
         if gurobi_expr.__class__ is self._gurobipy.LinExpr:
             if con.equality:
@@ -604,11 +597,12 @@ class GurobiPersistentNew(MIPSolver):
                                                              self._gurobipy.GRB.EQUAL,
                                                              rhs_val,
                                                              name=conname)
-                if not is_constant(rhs_expr):
-                    mutable_constant = _MutableConstant()
-                    mutable_constant.expr = rhs_expr
-                    mutable_constant.con = gurobipy_con
-                    self._mutable_helpers[con] = [mutable_constant]
+                if self.config.check_for_updated_mutable_params_in_constraints:
+                    if not is_constant(rhs_expr):
+                        mutable_constant = _MutableConstant()
+                        mutable_constant.expr = rhs_expr
+                        mutable_constant.con = gurobipy_con
+                        self._mutable_helpers[con] = [mutable_constant]
             elif con.has_lb() and con.has_ub():
                 lhs_expr = con.lower - repn_constant
                 rhs_expr = con.upper - repn_constant
@@ -616,46 +610,52 @@ class GurobiPersistentNew(MIPSolver):
                 rhs_val = value(rhs_expr)
                 gurobipy_con = self._solver_model.addRange(gurobi_expr, lhs_val, rhs_val, name=conname)
                 self._range_constraints.add(con)
-                if not is_constant(lhs_expr) or not is_constant(rhs_expr):
-                    mutable_range_constant = _MutableRangeConstant()
-                    mutable_range_constant.lhs_expr = lhs_expr
-                    mutable_range_constant.rhs_expr = rhs_expr
-                    mutable_range_constant.con = gurobipy_con
-                    mutable_range_constant.slack_name = 'Rg' + conname
-                    mutable_range_constant.gurobi_model = self._solver_model
-                    self._mutable_helpers[con] = [mutable_range_constant]
+                if self.config.check_for_updated_mutable_params_in_constraints:
+                    if not is_constant(lhs_expr) or not is_constant(rhs_expr):
+                        mutable_range_constant = _MutableRangeConstant()
+                        mutable_range_constant.lhs_expr = lhs_expr
+                        mutable_range_constant.rhs_expr = rhs_expr
+                        mutable_range_constant.con = gurobipy_con
+                        mutable_range_constant.slack_name = 'Rg' + conname
+                        mutable_range_constant.gurobi_model = self._solver_model
+                        self._mutable_helpers[con] = [mutable_range_constant]
             elif con.has_lb():
                 rhs_expr = con.lower - repn_constant
                 rhs_val = value(rhs_expr)
                 gurobipy_con = self._solver_model.addLConstr(gurobi_expr, self._gurobipy.GRB.GREATER_EQUAL, rhs_val, name=conname)
-                if not is_constant(rhs_expr):
-                    mutable_constant = _MutableConstant()
-                    mutable_constant.expr = rhs_expr
-                    mutable_constant.con = gurobipy_con
-                    self._mutable_helpers[con] = [mutable_constant]
+                if self.config.check_for_updated_mutable_params_in_constraints:
+                    if not is_constant(rhs_expr):
+                        mutable_constant = _MutableConstant()
+                        mutable_constant.expr = rhs_expr
+                        mutable_constant.con = gurobipy_con
+                        self._mutable_helpers[con] = [mutable_constant]
             elif con.has_ub():
                 rhs_expr = con.upper - repn_constant
                 rhs_val = value(rhs_expr)
                 gurobipy_con = self._solver_model.addLConstr(gurobi_expr, self._gurobipy.GRB.LESS_EQUAL, rhs_val, name=conname)
-                if not is_constant(rhs_expr):
-                    mutable_constant = _MutableConstant()
-                    mutable_constant.expr = rhs_expr
-                    mutable_constant.con = gurobipy_con
-                    self._mutable_helpers[con] = [mutable_constant]
+                if self.config.check_for_updated_mutable_params_in_constraints:
+                    if not is_constant(rhs_expr):
+                        mutable_constant = _MutableConstant()
+                        mutable_constant.expr = rhs_expr
+                        mutable_constant.con = gurobipy_con
+                        self._mutable_helpers[con] = [mutable_constant]
             else:
                 raise ValueError("Constraint does not have a lower "
                                  "or an upper bound: {0} \n".format(con))
-            for tmp in mutable_linear_coefficients:
-                tmp.con = gurobipy_con
-                tmp.gurobi_model = self._solver_model
-            if len(mutable_linear_coefficients) > 0:
-                if con not in self._mutable_helpers:
-                    self._mutable_helpers[con] = mutable_linear_coefficients
-                else:
-                    self._mutable_helpers[con].extend(mutable_linear_coefficients)
+            if self.config.check_for_updated_mutable_params_in_constraints:
+                for tmp in mutable_linear_coefficients:
+                    tmp.con = gurobipy_con
+                    tmp.gurobi_model = self._solver_model
+                if len(mutable_linear_coefficients) > 0:
+                    if con not in self._mutable_helpers:
+                        self._mutable_helpers[con] = mutable_linear_coefficients
+                    else:
+                        self._mutable_helpers[con].extend(mutable_linear_coefficients)
         elif gurobi_expr.__class__ is self._gurobipy.QuadExpr:
             if con.equality:
-                raise NotImplementedError('Quadratic equality constraints are not supported')
+                rhs_expr = con.lower - repn_constant
+                rhs_val = value(rhs_expr)
+                gurobipy_con = self._solver_model.addQConstr(gurobi_expr, self._gurobipy.GRB.EQUAL, rhs_val, name=conname)
             elif con.has_lb() and con.has_ub():
                 raise NotImplementedError('Quadratic range constraints are not supported')
             elif con.has_lb():
@@ -669,14 +669,15 @@ class GurobiPersistentNew(MIPSolver):
             else:
                 raise ValueError("Constraint does not have a lower "
                                  "or an upper bound: {0} \n".format(con))
-            if len(mutable_linear_coefficients) > 0 or len(mutable_quadratic_coefficients) > 0 or not is_constant(repn_constant):
-                mutable_constant = _MutableConstant()
-                mutable_constant.expr = rhs_expr
-                mutable_quadratic_constraint = _MutableQuadraticConstraint(self._solver_model, gurobipy_con,
-                                                                           mutable_constant,
-                                                                           mutable_linear_coefficients,
-                                                                           mutable_quadratic_coefficients)
-                self._mutable_quadratic_helpers[con] = mutable_quadratic_constraint
+            if self.config.check_for_updated_mutable_params_in_constraints:
+                if len(mutable_linear_coefficients) > 0 or len(mutable_quadratic_coefficients) > 0 or not is_constant(repn_constant):
+                    mutable_constant = _MutableConstant()
+                    mutable_constant.expr = rhs_expr
+                    mutable_quadratic_constraint = _MutableQuadraticConstraint(self._solver_model, gurobipy_con,
+                                                                               mutable_constant,
+                                                                               mutable_linear_coefficients,
+                                                                               mutable_quadratic_coefficients)
+                    self._mutable_quadratic_helpers[con] = mutable_quadratic_constraint
         else:
             raise ValueError('Unrecognized Gurobi expression type')
             
@@ -686,6 +687,17 @@ class GurobiPersistentNew(MIPSolver):
                 self._named_expressions[con].append((e, e.expr))
         for var in referenced_vars:
             self._referenced_variables[id(var)] += 1
+        if self.config.check_for_fixed_vars:
+            for v in identify_variables(con.body, include_fixed=True):
+                if v.is_fixed():
+                    v_id = id(v)
+                    if v_id in self._fixed_vars_to_dependent_cons_map:
+                        self._fixed_vars_to_dependent_cons_map[v_id].add(con)
+                    else:
+                        self._fixed_vars_to_dependent_cons_map[v_id] = OrderedSet([con])
+                    if con not in self._cons_with_fixed_vars:
+                        self._cons_with_fixed_vars[con] = ComponentSet()
+                    self._cons_with_fixed_vars[con].add(v)
         self._vars_referenced_by_con[con] = referenced_vars
         self._pyomo_con_to_solver_con_map[con] = gurobipy_con
         self._solver_con_to_pyomo_con_map[id(gurobipy_con)] = con
@@ -722,10 +734,20 @@ class GurobiPersistentNew(MIPSolver):
             sos_items = list(con.items())
 
         for v, w in sos_items:
+            v_id = id(v)
             self._vars_referenced_by_con[con].add(v)
-            gurobi_vars.append(self._pyomo_var_to_solver_var_map[id(v)])
-            self._referenced_variables[id(v)] += 1
+            gurobi_vars.append(self._pyomo_var_to_solver_var_map[v_id])
+            self._referenced_variables[v_id] += 1
             weights.append(w)
+            if self.config.check_for_fixed_vars:
+                if v.is_fixed():
+                    if v_id in self._fixed_vars_to_dependent_cons_map:
+                        self._fixed_vars_to_dependent_cons_map[v_id].add(con)
+                    else:
+                        self._fixed_vars_to_dependent_cons_map[v_id] = OrderedSet([con])
+                    if con not in self._cons_with_fixed_vars:
+                        self._cons_with_fixed_vars[con] = ComponentSet()
+                    self._cons_with_fixed_vars[con].add(v)
 
         gurobipy_con = self._solver_model.addSOS(sos_type, gurobi_vars, weights)
         self._pyomo_sos_to_solver_sos_map[con] = gurobipy_con
@@ -754,6 +776,14 @@ class GurobiPersistentNew(MIPSolver):
         self._mutable_helpers.pop(con, None)
         self._mutable_quadratic_helpers.pop(con, None)
         self._named_expressions.pop(con, None)
+        if con in self._cons_with_fixed_vars:
+            fixed_vars_in_con = self._cons_with_fixed_vars[con]
+            for v in fixed_vars_in_con:
+                v_id = id(v)
+                self._fixed_vars_to_dependent_cons_map[v_id].remove(con)
+                if len(self._fixed_vars_to_dependent_cons_map[v_id]) == 0:
+                    del self._fixed_vars_to_dependent_cons_map[v_id]
+            del self._cons_with_fixed_vars[con]
         self._needs_updated = True
 
     def remove_sos_constraint(self, con):
@@ -768,6 +798,15 @@ class GurobiPersistentNew(MIPSolver):
         del self._vars_referenced_by_con[con]
         del self._pyomo_sos_to_solver_sos_map[con]
         del self._solver_sos_to_pyomo_sos_map[id(solver_sos_con)]
+        if con in self._cons_with_fixed_vars:
+            fixed_vars_in_con = self._cons_with_fixed_vars[con]
+            for v in fixed_vars_in_con:
+                v_id = id(v)
+                self._fixed_vars_to_dependent_cons_map[v_id].remove(con)
+                if len(self._fixed_vars_to_dependent_cons_map[v_id]) == 0:
+                    del self._fixed_vars_to_dependent_cons_map[v_id]
+            del self._cons_with_fixed_vars[con]
+        self._needs_updated = True
 
     def remove_var(self, var):
         if self._referenced_variables[id(var)] != 0:
@@ -798,6 +837,14 @@ class GurobiPersistentNew(MIPSolver):
                 lb = value(var.lb)
             if var.has_ub():
                 ub = value(var.ub)
+            if var_id in self._fixed_vars_to_dependent_cons_map:
+                for con in self._fixed_vars_to_dependent_cons_map[var_id]:
+                    self._cons_with_fixed_vars[con].remove(var)
+                    if len(self._cons_with_fixed_vars[con]) == 0:
+                        del self._cons_with_fixed_vars[con]
+                    self.remove_constraint(con)
+                    self.add_constraint(con)
+                del self._fixed_vars_to_dependent_cons_map[var_id]
         gurobipy_var.setAttr('lb', lb)
         gurobipy_var.setAttr('ub', ub)
         gurobipy_var.setAttr('vtype', vtype)
@@ -1032,9 +1079,9 @@ class GurobiPersistentNew(MIPSolver):
             linear_cons_to_load = self._solver_model.getConstrs()
             quadratic_cons_to_load = self._solver_model.getQConstrs()
         else:
-            gurobi_cons_to_load = set([con_map[pyomo_con] for pyomo_con in cons_to_load])
-            linear_cons_to_load = list(gurobi_cons_to_load.intersection(set(self._solver_model.getConstrs())))
-            quadratic_cons_to_load = list(gurobi_cons_to_load.intersection(set(self._solver_model.getQConstrs())))
+            gurobi_cons_to_load = OrderedSet([con_map[pyomo_con] for pyomo_con in cons_to_load])
+            linear_cons_to_load = list(gurobi_cons_to_load.intersection(OrderedSet(self._solver_model.getConstrs())))
+            quadratic_cons_to_load = list(gurobi_cons_to_load.intersection(OrderedSet(self._solver_model.getQConstrs())))
         linear_vals = self._solver_model.getAttr("Pi", linear_cons_to_load)
         quadratic_vals = self._solver_model.getAttr("QCPi", quadratic_cons_to_load)
 
@@ -1054,15 +1101,15 @@ class GurobiPersistentNew(MIPSolver):
         reverse_con_map = self._solver_con_to_pyomo_con_map
         slack = self._pyomo_model.slack
 
-        gurobi_range_con_vars = set(self._solver_model.getVars()) - set(self._pyomo_var_to_solver_var_map.values())
+        gurobi_range_con_vars = OrderedSet(self._solver_model.getVars()) - OrderedSet(self._pyomo_var_to_solver_var_map.values())
 
         if cons_to_load is None:
             linear_cons_to_load = self._solver_model.getConstrs()
             quadratic_cons_to_load = self._solver_model.getQConstrs()
         else:
-            gurobi_cons_to_load = set([con_map[pyomo_con] for pyomo_con in cons_to_load])
-            linear_cons_to_load = list(gurobi_cons_to_load.intersection(set(self._solver_model.getConstrs())))
-            quadratic_cons_to_load = list(gurobi_cons_to_load.intersection(set(self._solver_model.getQConstrs())))
+            gurobi_cons_to_load = OrderedSet([con_map[pyomo_con] for pyomo_con in cons_to_load])
+            linear_cons_to_load = list(gurobi_cons_to_load.intersection(OrderedSet(self._solver_model.getConstrs())))
+            quadratic_cons_to_load = list(gurobi_cons_to_load.intersection(OrderedSet(self._solver_model.getQConstrs())))
         linear_vals = self._solver_model.getAttr("Slack", linear_cons_to_load)
         quadratic_vals = self._solver_model.getAttr("QCSlack", quadratic_cons_to_load)
 
@@ -1124,33 +1171,13 @@ class GurobiPersistentNew(MIPSolver):
                     self.add_constraint(c)
         if self.config.update_vars:
             vars_to_update = current_vars - new_vars
-            gurobi_vars = list()
-            lbs = list()
-            ubs = list()
-            vtypes = list()
             for v in vars_to_update:
-                vtypes.append(self._gurobi_vtype_from_var(v))
-                if v.is_fixed():
-                    lbs.append(v.value)
-                    ubs.append(v.value)
-                else:
-                    lb = -self._gurobipy.GRB.INFINITY
-                    ub = self._gurobipy.GRB.INFINITY
-                    if v.has_lb():
-                        lb = value(v.lb)
-                    if v.has_ub():
-                        ub = value(v.ub)
-                    lbs.append(lb)
-                    ubs.append(ub)
-                gurobi_vars.append(self._pyomo_var_to_solver_var_map[id(v)])
-            self._solver_model.setAttr('lb', gurobi_vars, lbs)
-            self._solver_model.setAttr('ub', gurobi_vars, ubs)
-            self._solver_model.setAttr('vtype', gurobi_vars, vtypes)
+                self.update_var(v)
         if self.config.update_named_expressions:
             for c, expr_list in self._named_expressions.items():
                 for named_expr, old_expr in expr_list:
                     if not (named_expr.expr is old_expr):
-                        self._remove_constraint(c)
+                        self.remove_constraint(c)
                         self.add_constraint(c)
                         break
         if self.config.check_for_updated_mutable_params_in_constraints:
@@ -1200,7 +1227,7 @@ class GurobiPersistentNew(MIPSolver):
 
     def _update_gurobi_model(self):
         self._solver_model.update()
-        self._constraints_added_since_update = set()
+        self._constraints_added_since_update = OrderedSet()
         self._vars_added_since_update = ComponentSet()
         self._needs_updated = False
 
@@ -1227,7 +1254,7 @@ class GurobiPersistentNew(MIPSolver):
             Name of the file to which the model should be written.
         """
         self._solver_model.write(filename)
-        self._constraints_added_since_update = set()
+        self._constraints_added_since_update = OrderedSet()
         self._vars_added_since_update = ComponentSet()
         self._needs_updated = False
 
