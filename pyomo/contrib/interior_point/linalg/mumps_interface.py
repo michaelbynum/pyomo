@@ -115,6 +115,31 @@ class MumpsInterface(LinearSolverInterface):
         self.set_icntl(23, new_allocation)
         return new_allocation
 
+    def try_factorization(self, kkt):
+        try:
+            self.do_symbolic_factorization(kkt)
+            self.do_numeric_factorization(kkt)
+        except RuntimeError as err:
+            return err
+        return None
+
+    def is_numerically_singular(self, err=None, raise_if_not=True):
+        num_sing_err = True
+        if err:
+            # -6: Structural singularity in symbolic factorization
+            # -10: Singularity in numeric factorization
+            if ('MUMPS error: -10' not in str(err) and
+                'MUMPS error: -6' not in str(err)):
+                num_sing_err = False
+                if raise_if_not:
+                    raise err
+        status = self.get_info(1)
+        if status == -10 or status == -6:
+            # Only return True if status and error both imply singularity
+            return True and num_sing_err
+        else:
+            return False
+
     def do_back_solve(self, rhs):
         return self._mumps.do_back_solve(rhs)
 
@@ -192,7 +217,7 @@ class MumpsInterface(LinearSolverInterface):
 
         self.logger.debug(header_string.format(*header_fields))
 
-    def log_info(self, iter_no, include_error=True, extra_fields=[]):
+    def log_info(self, iter_no='', include_error=True, extra_fields=[]):
         fields = [iter_no]
         fields.append(self.get_infog(1))   # Status, 0 for success
         fields.append(self.get_infog(28))  # Number of null pivots

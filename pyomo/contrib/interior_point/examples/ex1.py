@@ -1,5 +1,5 @@
 import pyomo.environ as pe
-from pyomo.contrib.interior_point.interior_point import solve_interior_point
+from pyomo.contrib.interior_point.interior_point import InteriorPointSolver
 from pyomo.contrib.interior_point.interface import InteriorPointInterface
 from pyomo.contrib.interior_point.linalg.mumps_interface import MumpsInterface
 import logging
@@ -21,5 +21,9 @@ interface = InteriorPointInterface(m)
 linear_solver = MumpsInterface(log_filename='lin_sol.log')
 # Set error level to 1 (most detailed)
 linear_solver.set_icntl(11, 1)
-x, duals_eq, duals_ineq = solve_interior_point(interface, linear_solver)
+linear_solver.allow_reallocation = True
+
+ip_solver = InteriorPointSolver(linear_solver)
+#x, duals_eq, duals_ineq = solve_interior_point(interface, linear_solver)
+x, duals_eq, duals_ineq = ip_solver.solve(interface)
 print(x, duals_eq, duals_ineq)
