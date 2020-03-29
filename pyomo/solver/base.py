@@ -108,6 +108,9 @@ class Solver(object):
             "Derived Solver class %s failed to implement solve()"
             % (self.__class__.__name__,))
 
+    def is_persistent(self):
+        return False
+
     @deprecated("Casting a solver to bool() is deprecated.  Use available()",
                 version='TBD')
     def __bool__(self):

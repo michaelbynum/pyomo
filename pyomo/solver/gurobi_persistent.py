@@ -399,6 +399,9 @@ class GurobiPersistentNew(MIPSolver):
         except self._gurobipy.GurobiError:
             return False
 
+    def is_persistent(self):
+        return True
+
     def solve(self, model, options=None, **config_options):
         """
         solve a model
