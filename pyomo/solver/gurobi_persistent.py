@@ -592,7 +592,7 @@ class GurobiPersistentNew(MIPSolver):
             referenced_vars = self._walker.referenced_vars
             repn_constant = 0
 
-        if gurobi_expr.__class__ is self._gurobipy.LinExpr:
+        if gurobi_expr.__class__ in {self._gurobipy.LinExpr, self._gurobipy.Var}:
             if con.equality:
                 rhs_expr = con.lower - repn_constant
                 rhs_val = value(rhs_expr)
@@ -1144,7 +1144,7 @@ class GurobiPersistentNew(MIPSolver):
             current_vars = ComponentSet(v for v in self._pyomo_model.component_data_objects(Var, descend_into=True, sort=True))
             new_vars = current_vars - last_solve_vars
             old_vars = last_solve_vars - current_vars
-        if self.config.check_for_new_or_removed_constraints or self.config.update_cons:
+        if self.config.check_for_new_or_removed_constraints or self.config.update_constraints:
             last_solve_cons = ComponentSet(self._solver_con_to_pyomo_con_map.values())
             current_cons = ComponentSet(c for c in self._pyomo_model.component_data_objects(Constraint, active=True, descend_into=True, sort=True))
             new_cons = current_cons - last_solve_cons
