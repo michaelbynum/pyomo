@@ -60,7 +60,7 @@ class TestGurobiPersistentSimpleLPUpdates(unittest.TestCase):
         self.assertAlmostEqual(y, self.m.y.value)
 
         self.set_params(-1.25, -1, 0.5, -2)
-        res = opt.solve(self.m, load_solutions=False)
+        res = opt.solve(self.m, load_solution=False)
         self.assertAlmostEqual(x, self.m.x.value)
         self.assertAlmostEqual(y, self.m.y.value)
         x, y = self.get_solution()

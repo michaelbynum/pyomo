@@ -10,27 +10,31 @@
 
 import os
 import sys
+from pyutilib.common import ApplicationError, WindowsError
+from pyutilib.services import TempfileManager
+from pyutilib.subprocess import run
+from pyomo.common.config import ConfigValue, add_docstring_list, Path, NonNegativeFloat
+from pyomo.common.fileutils import Executable, this_file_dir
+from pyomo.common.timing import TicTocTimer
+from pyomo.solver.base import MIPSolver, Results, TerminationCondition, SolutionLoader
+# from pyomo.writer.cpxlp import ProblemWriter_cpxlp
+from pyomo.repn.plugins.cpxlp import ProblemWriter_cpxlp
+from pyomo.opt.base.solvers import SolverFactory
+from pyomo.core.kernel.component_map import ComponentMap
+import subprocess
+import io
+import logging
+from pyomo.core.base.suffix import active_import_suffix_generator
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
-from six import iteritems
 
-from pyutilib.common import ApplicationError, WindowsError
-from pyutilib.services import TempfileManager
-from pyutilib.subprocess import run
 
-from pyomo.common.config import (
-    ConfigBlock, ConfigList, ConfigValue, add_docstring_list, In, Path,
-)
-from pyomo.common.fileutils import Executable, this_file_dir
-from pyomo.common.timing import TicTocTimer
-from pyomo.solver.base import MIPSolver, Results
-from pyomo.writer.cpxlp import ProblemWriter_cpxlp
+logger = logging.getLogger(__name__)
 
-from pyomo.opt.base.solvers import SolverFactory
 
-@SolverFactory.register('NEW_gurobi', doc='The GUROBI LP/MIP solver')
+@SolverFactory.register('NEW_gurobi', doc='An interface to Gurobi')
 class GurobiSolver(MIPSolver):
     CONFIG = MIPSolver.CONFIG()
 
@@ -42,19 +46,20 @@ class GurobiSolver(MIPSolver):
         if solver_io == 'lp':
             return GurobiSolver_LP(**kwds)
         elif solver_io == 'nl':
-            return GurobiSolver_NL(**kwds)
+            raise NotImplementedError('nl interface is not supported yet.')
         elif solver_io == 'mps':
-            return GurobiSolver_MPS(**kwds)
+            raise NotImplementedError('mps interface is not supported yet.')
         # For the direct / persistent solvers, they are implemented in
         # other modules.  To simplify imports, we will defer to the
         # SolverFactory
         elif solver_io == 'persistent':
-            return SolverFactory('gurobi_persistent', **kwds)
+            return SolverFactory('gurobi_persistent_new', **kwds)
         elif solver_io in ('direct', 'python'):
-            return SolverFactory('gurobi_direct', **kwds)
+            return SolverFactory('gurobi_persistent_new', **kwds)
         else:
             raise ValueError("Invalid solver_io for GurobiSolver: %s"
                              % (solver_io,))
+
 
 class GurobiSolver_LP(GurobiSolver):
     CONFIG = GurobiSolver.CONFIG()
@@ -79,9 +84,9 @@ class GurobiSolver_LP(GurobiSolver):
         domain=Path(),
     ))
 
-    CONFIG.declare_from(ProblemWriter_cpxlp.CONFIG, skip={
-        'allow_quadratic_objective', 'allow_quadratic_constraints',
-        'allow_sos1', 'allow_sos2'})
+    # CONFIG.declare_from(ProblemWriter_cpxlp.CONFIG, skip={
+    #     'allow_quadratic_objective', 'allow_quadratic_constraints',
+    #     'allow_sos1', 'allow_sos2'})
 
     def available(self):
         return self.config.executable.path() is not None
@@ -96,7 +101,7 @@ class GurobiSolver_LP(GurobiSolver):
         """
         if not self.available():
             return False
-        gurobi_cl = os.path.join(os.path.dirname(self.config.executable),
+        gurobi_cl = os.path.join(os.path.dirname(str(self.config.executable)),
                                  'gurobi_cl')
         try:
             rc = subprocess.call([gurobi_cl, "--license"],
@@ -106,6 +111,17 @@ class GurobiSolver_LP(GurobiSolver):
             rc = 1
         return rc == 0
 
+    def version(self):
+        assert self.available()
+        stream = io.StringIO()
+        rc = run([str(self.config.executable)],
+                 stdin=('from gurobipy import GRB; '
+                        'print(GRB.VERSION_MAJOR, GRB.VERSION_MINOR, GRB.VERSION_TECHNICAL); '
+                        'exit()'),
+                 ostream=stream)
+        res = stream.getvalue().strip().replace('(', '').replace(',', '').replace(')', '').split()
+        res = tuple(int(i) for i in res)
+        return res
 
     def solve(self, model, options=None, **config_options):
         """Solve a model""" + add_docstring_list("", GurobiSolver_LP.CONFIG)
@@ -122,7 +138,6 @@ class GurobiSolver_LP(GurobiSolver):
             # plugin.
             TempfileManager.pop(remove=not config.keepfiles)
 
-
     def _apply_solver(self, model, options, config):
         T = TicTocTimer()
         if not config.problemfile:
@@ -134,48 +149,49 @@ class GurobiSolver_LP(GurobiSolver):
         if not config.solnfile:
             config.solnfile = TempfileManager.create_tempfile(
                 suffix='.gurobi.txt')
-        
+        print(config.problemfile)
+
         # Gurobi can support certain problem features
-        writer_config = ProblemWriter_cpxlp.CONFIG()
-        writer_config.allow_quadratic_objective = True
-        writer_config.allow_quadratic_constraints = True
-        writer_config.allow_sos1 = True
-        writer_config.allow_sos2 = True
+        # writer_config = ProblemWriter_cpxlp.CONFIG()
+        # writer_config.allow_quadratic_objective = True
+        # writer_config.allow_quadratic_constraints = True
+        # writer_config.allow_sos1 = True
+        # writer_config.allow_sos2 = True
         # Copy over the relevant values from the solver config
         # (skip_implicit alloes the config to have additional fields
         # that are ignored)
-        writer_config.set_value(config, skip_implicit=True)
+        # writer_config.set_value(config, skip_implicit=True)
         T.toc("gurobi setup complete")
-        fname, symbol_map = ProblemWriter_cpxlp()(
-            model=model,
-            output_filename=config.problemfile,
-            io_options=writer_config
-        )
+        writer = ProblemWriter_cpxlp()
+        fname, symbol_map = writer(model=model,
+                                   output_filename=config.problemfile,
+                                   solver_capability=lambda x: True,
+                                   io_options=dict())
         assert fname == str(config.problemfile)
         T.toc("gurobi lp write complete")
 
         # Handle mapped options
-        mipgap = config.mipgap
+        mipgap = config.mip_gap
         if mipgap is not None:
             options['MIPGap'] = mipgap
         options['LogFile'] = config.logfile
 
         # Extract the suffixes
-        suffixes = []
+        suffixes = list(name for name, comp in active_import_suffix_generator(model))
 
         # Run Gurobi
         data = pickle.dumps(
-            ( config.problemfile,
-              config.solnfile,
-              { 'warmstart_file': config.warmstart_file,
-                'relax_integrality': config.relax_integrality, },
+            (config.problemfile,
+             config.solnfile,
+             {'warmstart_file': config.warmstart_file,
+              'relax_integrality': config.relax_integrality,},
               options.value(),
               suffixes), protocol=2)
-        timelim = config.timelimit
+        timelim = config.time_limit
         if timelim:
             timelim + min(max(1, 0.01*self._timelim), 100)
         cmd = [ str(config.executable),
-                os.path.join(this_file_dir(), 'GUROBI_RUN.py') ]
+                os.path.join(this_file_dir(), 'GUROBI_RUN.py')]
         try:
             T.toc("gurobi other preminaries done")
             rc, log = run(cmd, stdin=data, timelimit=timelim, tee=config.tee)
@@ -198,41 +214,66 @@ class GurobiSolver_LP(GurobiSolver):
                     "details (re-run with 'tee=True' to see the solver log.")
                 raise
 
-        results = Results()
+        results = Results(found_feasible_solution=result_data['found_feasible_solution'])
+        results.solver.declare('wallclock_time', ConfigValue(default=None, domain=NonNegativeFloat, doc='The wallclock time reported by Gurobi'))
+        results.solver.wallclock_time = result_data['solver']['wallclock_time']
+        results.solver.termination_condition = TerminationCondition[result_data['solver']['termination_condition']]
+        results.solver.best_feasible_objective = result_data['solver']['best_feasible_objective']
+        results.solver.best_objective_bound = result_data['solver']['best_objective_bound']
 
-        #results.problem.update(result_data['problem'])
-        for k,v in iteritems(result_data['problem']):
-            setattr(results.problem, k, v)
-
-        #results.solver.update(result_data['solver'])
-        for k,v in iteritems(result_data['solver']):
-            setattr(results.solver, k, v)
-        results.solver.name = 'gurobi_lp'
-
-        if not config.load_solution:
-            raise RuntimeError("TODO")
-        elif result_data['solution']['points']:
-            _sol = result_data['solution']['points'][0]
+        primals = ComponentMap()
+        duals = dict()
+        slacks = dict()
+        rc = ComponentMap()
+        if results.found_feasible_solution():
+            _sol = result_data['solutions'][0]
             X = _sol['X']
-            for i, vname in enumerate(_sol['VarName']):
+            for ndx, vname in enumerate(_sol['VarName']):
                 v = symbol_map.getObject(vname)
-                v.value = X[i]
+                primals[v] = X[ndx]
+            if 'Rc' in _sol:
+                Rc = _sol['Rc']
+                for ndx, vname in enumerate(_sol['VarName']):
+                    v = symbol_map.getObject(vname)
+                    rc[v] = Rc[ndx]
+            if 'Pi' in _sol:
+                Pi = _sol['Pi']
+                for ndx, cname in enumerate(_sol['ConstrName']):
+                    if cname in symbol_map.bySymbol or cname in symbol_map.aliases:
+                        c = symbol_map.getObject(cname)
+                        duals[c] = Pi[ndx]
+            if 'QCPi' in _sol:
+                QCPi = _sol['QCPi']
+                for ndx, cname in enumerate(_sol['QCName']):
+                    if cname in symbol_map.bySymbol or cname in symbol_map.aliases:
+                        c = symbol_map.getObject(cname)
+                        duals[c] = QCPi[ndx]
+            if 'Slack' in _sol:
+                Slack = _sol['Slack']
+                for ndx, cname in enumerate(_sol['ConstrName']):
+                    if cname in symbol_map.bySymbol or cname in symbol_map.aliases:
+                        c = symbol_map.getObject(cname)
+                        if c in slacks:
+                            if abs(Slack[ndx]) > abs(slacks[c]):
+                                slacks[c] = Slack[ndx]
+                        else:
+                            slacks[c] = Slack[ndx]
+            if 'QCSlack' in _sol:
+                QCSlack = _sol['QCSlack']
+                for ndx, cname in enumerate(_sol['QCName']):
+                    if cname in symbol_map.bySymbol or cname in symbol_map.aliases:
+                        c = symbol_map.getObject(cname)
+                        if c in slacks:
+                            if abs(QCSlack[ndx]) > abs(slacks[c]):
+                                slacks[c] = QCSlack[ndx]
+                        else:
+                            slacks[c] = QCSlack[ndx]
+
+        solution_loader = SolutionLoader(model=model, primals=primals, duals=duals, slacks=slacks, reduced_costs=rc)
+        results.solution_loader = solution_loader
+
+        if config.load_solution:
+            solution_loader.load_solution()
 
         T.toc("gurobi solution load complete")
         return results
-        
-
-if __name__ == '__main__':
-    solver = GurobiSolver_LP()
-    from pyomo.environ import *
-    m = ConcreteModel()
-    m.x = Var(bounds=(0,10))
-    m.y = Var(bounds=(0,5))
-    m.con1 = Constraint(expr=2*m.x+m.y <= 5)
-    m.con2 = Constraint(expr=m.x+2*m.y <= 6)
-    m.obj = Objective(expr=m.x+m.y, sense=maximize)
-
-    print(solver.solve(m, tee=True))
-    m.pprint()
-
-    

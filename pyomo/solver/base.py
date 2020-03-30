@@ -59,11 +59,11 @@ class TerminationCondition(enum.Enum):
     """The solver exited due to licensing problems"""
 
 
-class Solver(object):
+class Solver(six.with_metaclass(abc.ABCMeta, object)):
     """A generic optimization solver"""
 
     CONFIG = ConfigBlock()
-    CONFIG.declare('timelimit', ConfigValue(
+    CONFIG.declare('time_limit', ConfigValue(
         default=None,
         domain=NonNegativeFloat,
     ))
@@ -80,33 +80,28 @@ class Solver(object):
         domain=bool,
     ))
 
-
     def __init__(self, **kwds):
         self.config = self.CONFIG()
         self.options = ConfigBlock(implicit=True)
 
+    @abc.abstractmethod
     def available(self):
-        raise DeveloperError(
-            "Derived Solver class %s failed to implement available()"
-            % (self.__class__.__name__,))
+        pass
 
+    @abc.abstractmethod
     def license_status(self):
-        raise DeveloperError(
-            "Derived Solver class %s failed to implement license_status()"
-            % (self.__class__.__name__,))
+        pass
 
+    @abc.abstractmethod
     def version(self):
         """
         Returns a tuple describing the solver version.
         """
-        raise DeveloperError(
-            "Derived Solver class %s failed to implement version()"
-            % (self.__class__.__name__,))
+        pass
 
+    @abc.abstractmethod
     def solve(self, model, options=None, **config_options):
-        raise DeveloperError(
-            "Derived Solver class %s failed to implement solve()"
-            % (self.__class__.__name__,))
+        pass
 
     def is_persistent(self):
         return False
@@ -132,7 +127,7 @@ class Solver(object):
 
 class MIPSolver(Solver):
     CONFIG = Solver.CONFIG()
-    CONFIG.declare('mipgap', ConfigValue(
+    CONFIG.declare('mip_gap', ConfigValue(
         default=None,
         domain=NonNegativeFloat,
     ))
@@ -240,15 +235,15 @@ class SolutionLoader(SolutionLoaderBase):
         for v, val in self._primals.items():
             v.value = val
 
-        if hasattr(self._model, 'dual'):
+        if hasattr(self._model, 'dual') and self._model.dual.import_enabled():
             for c, val in self._duals.items():
                 self._model.dual[c] = val
 
-        if hasattr(self._model, 'slack'):
+        if hasattr(self._model, 'slack') and self._model.slack.import_enabled():
             for c, val in self._slacks.items():
                 self._model.slack[c] = val
 
-        if hasattr(self._model, 'rc'):
+        if hasattr(self._model, 'rc') and self._model.slack.import_enabled():
             for v, val in self._reduced_costs.items():
                 self._model.rc[v] = val
 
@@ -274,6 +269,9 @@ class SolutionLoader(SolutionLoaderBase):
         if not hasattr(self._model, 'dual'):
             self._model.dual = Suffix(direction=Suffix.IMPORT)
 
+        if not self._model.dual.import_enabled():
+            raise RuntimeError('dual Suffix is not enabled for importing')
+
         if cons_to_load is None:
             for c, val in self._duals.items():
                 self._model.dual[c] = val
@@ -285,6 +283,9 @@ class SolutionLoader(SolutionLoaderBase):
         if not hasattr(self._model, 'slack'):
             self._model.slack = Suffix(direction=Suffix.IMPORT)
 
+        if not self._model.slack.import_enabled():
+            raise RuntimeError('slack Suffix is not enabled for importing')
+
         if cons_to_load is None:
             for c, val in self._slacks.items():
                 self._model.slack[c] = val
@@ -295,6 +296,9 @@ class SolutionLoader(SolutionLoaderBase):
     def load_reduced_costs(self, vars_to_load=None):
         if not hasattr(self._model, 'rc'):
             self._model.rc = Suffix(direction=Suffix.IMPORT)
+
+        if not self._model.rc.import_enabled():
+            raise RuntimeError('rc Suffix is not enabled for importing')
 
         if vars_to_load is None:
             for v, val in self._reduced_costs.items():

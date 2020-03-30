@@ -281,9 +281,6 @@ class GurobiPersistentNew(MIPSolver):
                                                                       'Cannot be changed after set_instance is called.'))
     CONFIG.declare('stream_solver', ConfigValue(default=False, domain=bool,
                                                 doc='If True, show the Gurobi output'))
-    CONFIG.declare('load_solutions', ConfigValue(default=True, domain=bool,
-                                                 doc='If True, load the solution back into the Pyomo model after '
-                                                     'solving'))
     CONFIG.declare('check_for_updated_mutable_params_in_constraints',
                    ImmutableConfigValue(default=True, domain=bool,
                                         doc='If True, the solver interface will look for constraint coefficients that depend on '
@@ -398,6 +395,11 @@ class GurobiPersistentNew(MIPSolver):
             return True
         except self._gurobipy.GurobiError:
             return False
+
+    def version(self):
+        return (self._gurobipy.GRB.VERSION_MAJOR,
+                self._gurobipy.GRB.VERSION_MINOR,
+                self._gurobipy.GRB.VERSION_TECHNICAL)
 
     def is_persistent(self):
         return True
@@ -1004,7 +1006,7 @@ class GurobiPersistentNew(MIPSolver):
         except (self._gurobipy.GurobiError, AttributeError):
             pass
 
-        if self._tmp_config.load_solutions:
+        if self._tmp_config.load_solution:
             if gprob.SolCount > 0:
                 self.load_vars()
 
