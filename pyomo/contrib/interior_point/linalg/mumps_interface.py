@@ -144,7 +144,7 @@ class MumpsInterface(LinearSolverInterface):
         return self._mumps.do_back_solve(rhs)
 
     def get_inertia(self):
-        num_negative_eigenvalues = self.mumps.get_infog(12)
+        num_negative_eigenvalues = self.get_infog(12)
         num_positive_eigenvalues = self._dim - num_negative_eigenvalues
         return (num_positive_eigenvalues, num_negative_eigenvalues, 0)
 
