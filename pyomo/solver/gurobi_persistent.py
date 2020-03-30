@@ -322,16 +322,16 @@ class GurobiPersistentNew(MIPSolver):
                                             'Expressions each time solve is called. '
                                             'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_fixed_vars',
-                   ConfigValue(default=True,
-                               domain=bool,
-                               doc='If True, the solver interface will check for fixed '
-                                   'variables in each constraint that is added. If '
-                                   'The variable is fixed when the constraint gets '
-                                   'added and is later unfixed, the constraints will be '
-                                   'updated accordingly. If check_for_fixed_vars is False '
-                                   'and a variable is fixed when adding a constraint, the '
-                                   'constraint will not be updated correctly when the '
-                                   'variable is unfixed.'))
+                   ImmutableConfigValue(default=True,
+                                        domain=bool,
+                                        doc='If True, the solver interface will check for fixed '
+                                            'variables in each constraint that is added. If '
+                                            'The variable is fixed when the constraint gets '
+                                            'added and is later unfixed, the constraints will be '
+                                            'updated accordingly. If check_for_fixed_vars is False '
+                                            'and a variable is fixed when adding a constraint, the '
+                                            'constraint will not be updated correctly when the '
+                                            'variable is unfixed.'))
 
     __doc__ = add_docstring_list(__doc__, CONFIG)
 
