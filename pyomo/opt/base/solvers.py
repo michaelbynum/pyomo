@@ -674,6 +674,8 @@ class OptSolver(object):
             total_time = time.time() - write_start_time
             if self._report_timing:
                 print("      %6.2f seconds required to write file" % total_time)
+                import pyomo.repn.standard_repn
+                print("             %0.2f seconds generating standard representations" % (pyomo.repn.standard_repn.timer.toc(""),))
         else:
             if len(kwds):
                 raise ValueError(

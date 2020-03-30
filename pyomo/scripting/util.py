@@ -22,11 +22,6 @@ from six.moves import xrange
 from pyomo.common import pyomo_api
 
 try:
-    import yaml
-    yaml_available=True
-except ImportError:
-    yaml_available=False
-try:
     import cProfile as profile
 except ImportError:
     import profile
@@ -58,10 +53,11 @@ except:
 memory_data = Options()
 
 import pyutilib.misc
-from pyomo.common.plugin import ExtensionPoint, Plugin, implements
 from pyutilib.misc import Container
 from pyutilib.services import TempfileManager
 
+from pyomo.common.dependencies import yaml, yaml_available, yaml_load_args
+from pyomo.common.plugin import ExtensionPoint, Plugin, implements
 from pyomo.opt import ProblemFormat
 from pyomo.opt.base import SolverFactory
 from pyomo.opt.parallel import SolverManagerFactory
@@ -69,6 +65,7 @@ from pyomo.dataportal import DataPortal
 from pyomo.core import *
 from pyomo.core.base import TextLabeler
 import pyomo.core.base
+import pyomo.repn.standard_repn
 
 
 filter_excepthook=False
@@ -407,13 +404,7 @@ def create_model(data):
                                                  profile_memory=data.options.runtime.profile_memory,
                                                  report_timing=data.options.runtime.report_timing)
             elif suffix == "yml" or suffix == 'yaml':
-                try:
-                    import yaml
-                except:
-                    msg = "Cannot apply load data from a YAML file: PyYaml is not installed"
-                    raise SystemExit(msg)
-
-                modeldata = yaml.load(open(data.options.data.files[0]))
+                modeldata = yaml.load(open(data.options.data.files[0]), **yaml_load_args)
                 instance = model.create_instance(modeldata,
                                                  namespaces=data.options.data.namespaces,
                                                  profile_memory=data.options.runtime.profile_memory,
@@ -492,6 +483,8 @@ def create_model(data):
         if data.options.runtime.report_timing is True:
             total_time = time.time() - write_start_time
             print("      %6.2f seconds required to write file" % total_time)
+            print("             %0.2f seconds generating standard representations" % (pyomo.repn.standard_repn.timer.toc(""),))
+
 
         if (pympler_available is True) and (data.options.runtime.profile_memory >= 2):
             print("")
@@ -1032,7 +1025,7 @@ def get_config_values(filename):
         if not yaml_available:
             raise ValueError("ERROR: yaml configuration file specified, but pyyaml is not installed!")
         INPUT = open(filename, 'r')
-        val = yaml.load(INPUT)
+        val = yaml.load(INPUT, **yaml_load_args)
         INPUT.close()
         return val
     elif filename.endswith('.jsn') or filename.endswith('.json'):
