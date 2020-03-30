@@ -35,7 +35,9 @@ class TestSolvers(unittest.TestCase):
         m.obj = pe.Objective(expr=m.y)
         m.c1 = pe.Constraint(expr=m.y >= m.x)
         m.c2 = pe.Constraint(expr=m.y <= m.x - 1)
-        res = opt.solve(m)
+        with self.assertRaises(Exception):
+            res = opt.solve(m)
+        res = opt.solve(m, load_solution=False)
         self.assertNotEqual(res.solver.termination_condition, TerminationCondition.optimal)
         self.assertAlmostEqual(m.x.value, None)
         self.assertAlmostEqual(m.y.value, None)

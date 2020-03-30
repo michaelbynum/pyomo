@@ -221,11 +221,15 @@ class GurobiSolver_LP(GurobiSolver):
         results.solver.best_feasible_objective = result_data['solver']['best_feasible_objective']
         results.solver.best_objective_bound = result_data['solver']['best_objective_bound']
 
-        primals = ComponentMap()
-        duals = dict()
-        slacks = dict()
-        rc = ComponentMap()
+        primals = None
+        duals = None
+        slacks = None
+        rc = None
         if results.found_feasible_solution():
+            primals = ComponentMap()
+            duals = dict()
+            slacks = dict()
+            rc = ComponentMap()
             _sol = result_data['solutions'][0]
             X = _sol['X']
             for ndx, vname in enumerate(_sol['VarName']):
@@ -273,7 +277,19 @@ class GurobiSolver_LP(GurobiSolver):
         results.solution_loader = solution_loader
 
         if config.load_solution:
-            solution_loader.load_solution()
+            if results.solver.termination_condition == TerminationCondition.optimal:
+                solution_loader.load_solution()
+            elif results.found_feasible_solution():
+                logger.warning('Loading a feasible but suboptimal solution. '
+                               'Please set load_solution=False and check '
+                               'results.solver.termination_condition and '
+                               'resutls.found_feasible_solution() before loading a solution.')
+                solution_loader.load_solution()
+            else:
+                raise RuntimeError('A feasible solution was not found, so no solution can be loaded.'
+                                   'Please set load_solution=False and check '
+                                   'results.solver.termination_condition and '
+                                   'resutls.found_feasible_solution() before loading a solution.')
 
         T.toc("gurobi solution load complete")
         return results

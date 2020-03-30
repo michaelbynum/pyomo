@@ -68,13 +68,13 @@ class GurobiPersistentSolutionLoader(SolutionLoaderBase):
 
         self._solver.load_vars()
 
-        if hasattr(self._model, 'dual'):
+        if hasattr(self._model, 'dual') and self._model.dual.import_enabled():
             self._solver.load_duals()
 
-        if hasattr(self._model, 'slack'):
+        if hasattr(self._model, 'slack') and self._model.slack.import_enabled():
             self._solver.load_slacks()
 
-        if hasattr(self._model, 'rc'):
+        if hasattr(self._model, 'rc') and self._model.rc.import_enabled():
             self._solver.load_rc()
 
     def load_vars(self, vars_to_load=None, solution_number=0):
@@ -1008,6 +1008,11 @@ class GurobiPersistentNew(MIPSolver):
 
         if self._tmp_config.load_solution:
             if gprob.SolCount > 0:
+                if results.solver.termination_condition != TerminationCondition.optimal:
+                    logger.warning('Loading a feasible but suboptimal solution. '
+                                   'Please set load_solution=False and check '
+                                   'results.solver.termination_condition and '
+                                   'resutls.found_feasible_solution() before loading a solution.')
                 self.load_vars()
 
                 if extract_reduced_costs:
@@ -1018,6 +1023,11 @@ class GurobiPersistentNew(MIPSolver):
 
                 if extract_slacks:
                     self.load_slacks()
+            else:
+                raise RuntimeError('A feasible solution was not found, so no solution can be loaded.'
+                                   'Please set load_solution=False and check '
+                                   'results.solver.termination_condition and '
+                                   'resutls.found_feasible_solution() before loading a solution.')
 
         return results
 
@@ -1058,6 +1068,10 @@ class GurobiPersistentNew(MIPSolver):
             self._update_gurobi_model()
         if not hasattr(self._pyomo_model, 'rc'):
             self._pyomo_model.rc = Suffix(direction=Suffix.IMPORT)
+
+        if not self._pyomo_model.rc.import_enabled():
+            raise RuntimeError('rc Suffix is not enabled for importing')
+
         var_map = self._pyomo_var_to_solver_var_map
         ref_vars = self._referenced_variables
         rc = self._pyomo_model.rc
@@ -1076,6 +1090,10 @@ class GurobiPersistentNew(MIPSolver):
             self._update_gurobi_model()
         if not hasattr(self._pyomo_model, 'dual'):
             self._pyomo_model.dual = Suffix(direction=Suffix.IMPORT)
+
+        if not self._pyomo_model.dual.import_enabled():
+            raise RuntimeError('dual Suffix is not enabled for importing')
+
         con_map = self._pyomo_con_to_solver_con_map
         reverse_con_map = self._solver_con_to_pyomo_con_map
         dual = self._pyomo_model.dual
@@ -1102,6 +1120,10 @@ class GurobiPersistentNew(MIPSolver):
             self._update_gurobi_model()
         if not hasattr(self._pyomo_model, 'slack'):
             self._pyomo_model.slack = Suffix(direction=Suffix.IMPORT)
+
+        if not self._pyomo_model.slack.import_enabled():
+            raise RuntimeError('slack Suffix is not enabled for importing')
+
         con_map = self._pyomo_con_to_solver_con_map
         reverse_con_map = self._solver_con_to_pyomo_con_map
         slack = self._pyomo_model.slack
