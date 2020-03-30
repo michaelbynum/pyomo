@@ -186,22 +186,34 @@ class InteriorPointSolver(object):
                                       max_reg_coef=1e10,
                                       factor_increase=1e2):
         linear_solver = self.linear_solver
+        desired_n_neg_evals = (self.interface._nlp.n_eq_constraints() + 
+                               self.interface._nlp.n_ineq_constraints())
+
+        reg_kkt_1 = kkt
+        reg_coef = 1
 
         err = linear_solver.try_factorization(kkt)
         if linear_solver.is_numerically_singular(err):
             self.logger.info(' KKT matrix is numerically singular. '
-                             'Regularizing...')
+                             'Regularizing equality gradient...')
             reg_kkt_1 = self.interface.regularize_equality_gradient(kkt)
+            err = linear_solver.try_factorization(reg_kkt_1)
+
+        if (linear_solver.is_numerically_singular(err) or
+                linear_solver.get_inertia()[1] != desired_n_neg_evals):
+
+            self.logger.info(' KKT matrix has incorrect inertia.. '
+                             'Regularizing Hessian...')
 
             # Every linear_solver should have an interface to a logger
             # like this:
             # Should probably use a context manager to properly log regularization
             # iterations...
-            linear_solver.logger.info(' Entering regularization')
-            linear_solver.log_header(include_error=False, extra_fields=['Coefficient'])
+            linear_solver.logger.info(' Regularizing Hessian')
+            linear_solver.log_header(include_error=False,
+                                     extra_fields=['Coefficient'])
             linear_solver.log_info(include_error=False)
 
-            reg_coef = 1
             while reg_coef <= max_reg_coef:
                 # Construct new regularized KKT matrix
                 reg_kkt_2 = self.interface.regularize_hessian(reg_kkt_1, 
@@ -209,16 +221,19 @@ class InteriorPointSolver(object):
 
                 err = linear_solver.try_factorization(reg_kkt_2)
                 linear_solver.log_info(include_error=False, 
-                        extra_fields=[reg_coef])
-                if linear_solver.is_numerically_singular(err):
+                                       extra_fields=[reg_coef])
+                if (linear_solver.is_numerically_singular(err) or
+                        linear_solver.get_inertia()[1] != desired_n_neg_evals):
                     reg_coef = reg_coef * factor_increase
                 else:
+                    # Success
                     break
 
             if reg_coef > max_reg_coef:
                 raise RuntimeError(
                     'Regularization coefficient has exceeded maximum. '
                     'At this point IPOPT would enter feasibility restoration.')
+
             linear_solver.logger.info(' Exiting regularization')
 
                 # Should log more info about regularization:
