@@ -15,7 +15,7 @@ from pyomo.repn import generate_standard_repn
 from pyomo.core.kernel.objective import minimize, maximize
 from pyomo.core.kernel.component_set import ComponentSet
 from pyomo.opt.base import SolverFactory
-from pyomo.core.base.suffix import Suffix
+from pyomo.core.base.suffix import Suffix, active_import_suffix_generator
 from pyomo.core.base.var import Var
 from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.sos import SOSConstraint
@@ -930,23 +930,19 @@ class GurobiPersistentNew(MIPSolver):
         # reduced-costs. scan through the solver suffix list
         # and throw an exception if the user has specified
         # any others.
-        suffixes = list(self._pyomo_model.component_objects(Suffix, active=True, descend_into=False, sort=True))
+        suffixes = list(name for name, comp in active_import_suffix_generator(self._pyomo_model))
         extract_duals = False
         extract_slacks = False
         extract_reduced_costs = False
         for suffix in suffixes:
-            flag = False
-            if re.match(suffix, "dual"):
+            if 'dual' == suffix:
                 extract_duals = True
-                flag = True
-            if re.match(suffix, "slack"):
+            elif 'slack' == suffix:
                 extract_slacks = True
-                flag = True
-            if re.match(suffix, "rc"):
+            elif 'rc' == suffix:
                 extract_reduced_costs = True
-                flag = True
-            if not flag:
-                raise RuntimeError("***The gurobi_direct solver plugin cannot extract solution suffix="+suffix)
+            else:
+                raise RuntimeError("***The gurobi_persistent solver plugin cannot extract solution suffix="+suffix)
 
         gprob = self._solver_model
         grb = self._gurobipy.GRB

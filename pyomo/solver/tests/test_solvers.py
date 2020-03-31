@@ -45,6 +45,24 @@ class TestSolvers(unittest.TestCase):
         self.assertEqual(res.solver.best_feasible_objective, None)
 
     @parameterized.expand(input=all_solvers)
+    def test_duals(self, name, opt):
+        if not opt.available():
+            raise unittest.SkipTest(name + ' is not available')
+        m = pe.ConcreteModel()
+        m.x = pe.Var()
+        m.y = pe.Var()
+        m.obj = pe.Objective(expr=m.y)
+        m.c1 = pe.Constraint(expr=m.y - m.x >= 0)
+        m.c2 = pe.Constraint(expr=m.y + m.x - 2 >= 0)
+        m.dual = pe.Suffix(direction=pe.Suffix.IMPORT)
+
+        res = opt.solve(m)
+        self.assertAlmostEqual(m.x.value, 1)
+        self.assertAlmostEqual(m.y.value, 1)
+        self.assertAlmostEqual(m.dual[m.c1], 0.5)
+        self.assertAlmostEqual(m.dual[m.c2], 0.5)
+
+    @parameterized.expand(input=all_solvers)
     def test_solution_loader(self, name, opt):
         if not opt.available():
             raise unittest.SkipTest(name + ' is not available')
