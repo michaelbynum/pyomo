@@ -57,7 +57,7 @@ class InteriorPointSolver(object):
         tol = kwargs.pop('tol', self.tol)
         regularize_kkt = kwargs.pop('regularize_kkt', self.regularize_kkt)
         max_reg_coef = kwargs.pop('max_reg_coef', 1e10)
-        reg_factor_increase = kwargs.pop('reg_factor_increase', 100)
+        reg_factor_increase = kwargs.pop('reg_factor_increase', 1e2)
 
         self.set_interface(interface)
 
@@ -190,7 +190,7 @@ class InteriorPointSolver(object):
                                self.interface._nlp.n_ineq_constraints())
 
         reg_kkt_1 = kkt
-        reg_coef = 1
+        reg_coef = 1e-4
 
         err = linear_solver.try_factorization(kkt)
         if linear_solver.is_numerically_singular(err):
