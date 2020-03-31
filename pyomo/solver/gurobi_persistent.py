@@ -354,8 +354,6 @@ class GurobiPersistentNew(MIPSolver):
         self._referenced_variables = OrderedDict()
         self._referenced_params = OrderedDict()
         self._range_constraints = OrderedSet()
-        self._tmp_config = None
-        self._tmp_options = None
         self._mutable_helpers = OrderedDict()
         self._mutable_quadratic_helpers = OrderedDict()
         self._mutable_objective = None
@@ -419,24 +417,24 @@ class GurobiPersistentNew(MIPSolver):
 
         if options is None:
             options = dict()
-        self._tmp_options = self.options(options, preserve_implicit=True)
-        self._tmp_config = self.config(config_options)
+        tmp_options = self.options(options, preserve_implicit=True)
+        tmp_config = self.config(config_options)
 
         if model is self._pyomo_model:
-            self.update()
+            self._update(tmp_config)
         else:
-            self.set_instance(model)
+            self.set_instance(model, **config_options)
 
-        self._apply_solver()
-        return self._postsolve()
+        self._apply_solver(tmp_options, tmp_config)
+        return self._postsolve(tmp_config)
 
-    def _apply_solver(self):
-        if self._tmp_config.stream_solver:
+    def _apply_solver(self, options, config):
+        if config.stream_solver:
             self._solver_model.setParam('OutputFlag', 1)
         else:
             self._solver_model.setParam('OutputFlag', 0)
 
-        for key, option in self._tmp_options.items():
+        for key, option in options.items():
             self._solver_model.setParam(key, option)
         self._solver_model.optimize(self._callback)
         self._needs_updated = False
@@ -926,7 +924,7 @@ class GurobiPersistentNew(MIPSolver):
 
         self._needs_updated = True
 
-    def _postsolve(self):
+    def _postsolve(self, config):
         # the only suffixes that we extract from GUROBI are
         # constraint duals, constraint slacks, and variable
         # reduced-costs. scan through the solver suffix list
@@ -1006,7 +1004,7 @@ class GurobiPersistentNew(MIPSolver):
         except (self._gurobipy.GurobiError, AttributeError):
             pass
 
-        if self._tmp_config.load_solution:
+        if config.load_solution:
             if gprob.SolCount > 0:
                 if results.solver.termination_condition != TerminationCondition.optimal:
                     logger.warning('Loading a feasible but suboptimal solution. '
@@ -1161,35 +1159,38 @@ class GurobiPersistentNew(MIPSolver):
             slack[pyomo_con] = val
 
     def update(self):
+        self._update(self.config)
+
+    def _update(self, config):
         # the use of config is broken here!!!
         if self._needs_updated:
             self._solver_model.update()
-        if self.config.check_for_new_or_removed_vars or self.config.update_vars:
+        if config.check_for_new_or_removed_vars or config.update_vars:
             last_solve_vars = ComponentSet(self._solver_var_to_pyomo_var_map.values())
             current_vars = ComponentSet(v for v in self._pyomo_model.component_data_objects(Var, descend_into=True, sort=True))
             new_vars = current_vars - last_solve_vars
             old_vars = last_solve_vars - current_vars
-        if self.config.check_for_new_or_removed_constraints or self.config.update_constraints:
+        if config.check_for_new_or_removed_constraints or config.update_constraints:
             last_solve_cons = ComponentSet(self._solver_con_to_pyomo_con_map.values())
             current_cons = ComponentSet(c for c in self._pyomo_model.component_data_objects(Constraint, active=True, descend_into=True, sort=True))
             new_cons = current_cons - last_solve_cons
             old_cons = last_solve_cons - current_cons
-        if self.config.check_for_new_or_removed_constraints:
+        if config.check_for_new_or_removed_constraints:
             for c in old_cons:
                 self.remove_constraint(c)
             for c in self._pyomo_sos_to_solver_sos_map.keys():
                 self.remove_sos_constraint(c)
-        if self.config.check_for_new_or_removed_vars:
+        if config.check_for_new_or_removed_vars:
             for v in old_vars:
                 self.remove_var(v)
             for v in new_vars:
                 self.add_var(v)
-        if self.config.check_for_new_or_removed_constraints:
+        if config.check_for_new_or_removed_constraints:
             for c in new_cons:
                 self.add_constraint(c)
             for c in self._pyomo_model.component_data_objects(SOSConstraint, descend_into=True, active=True, sort=True):
                 self.add_sos_constraint(c)
-        if self.config.update_constraints:
+        if config.update_constraints:
             cons_to_update = current_cons - new_cons
             for c in cons_to_update:
                 if ((c.body is not self._constraint_bodies[id(c)]) or
@@ -1197,18 +1198,18 @@ class GurobiPersistentNew(MIPSolver):
                         (value(c.upper) != self._constraint_uppers[id(c)])):
                     self.remove_constraint(c)
                     self.add_constraint(c)
-        if self.config.update_vars:
+        if config.update_vars:
             vars_to_update = current_vars - new_vars
             for v in vars_to_update:
                 self.update_var(v)
-        if self.config.update_named_expressions:
+        if config.update_named_expressions:
             for c, expr_list in self._named_expressions.items():
                 for named_expr, old_expr in expr_list:
                     if not (named_expr.expr is old_expr):
                         self.remove_constraint(c)
                         self.add_constraint(c)
                         break
-        if self.config.check_for_updated_mutable_params_in_constraints:
+        if config.check_for_updated_mutable_params_in_constraints:
             for con, helpers in self._mutable_helpers.items():
                 for helper in helpers:
                     helper.update()
@@ -1236,13 +1237,13 @@ class GurobiPersistentNew(MIPSolver):
         if (not already_called_set_objective) and (not (pyomo_obj.expr is self._objective_expr)):
             self._set_objective(pyomo_obj)
             already_called_set_objective = True
-        if (not already_called_set_objective) and self.config.update_named_expressions:
+        if (not already_called_set_objective) and config.update_named_expressions:
             for named_expr, old_expr in self._obj_named_expressions:
                 if not (named_expr.expr is old_expr):
                     self._set_objective(pyomo_obj)
                     already_called_set_objective = True
                     break
-        if (not already_called_set_objective) and self.config.check_for_updated_mutable_params_in_objective:
+        if (not already_called_set_objective) and config.check_for_updated_mutable_params_in_objective:
             helper = self._mutable_objective
             new_gurobi_expr = helper.get_updated_expression()
             if new_gurobi_expr is not None:
