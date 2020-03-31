@@ -21,7 +21,7 @@ from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.sos import SOSConstraint
 from pyomo.core.base.objective import Objective
 from pyomo.common.config import ConfigValue, add_docstring_list, NonNegativeFloat
-from pyutilib.misc.config import ImmutableConfigValue
+from pyutilib.misc.config import MarkImmutable
 from pyomo.common.errors import PyomoException
 from pyomo.solver.base import MIPSolver, ResultsBase, SolutionLoaderBase, TerminationCondition
 from pyomo.core.base import SymbolMap, NumericLabeler, TextLabeler
@@ -275,22 +275,24 @@ class GurobiPersistentNew(MIPSolver):
     """
     CONFIG = MIPSolver.CONFIG()
 
-    CONFIG.declare('symbolic_solver_labels', ImmutableConfigValue(default=False, domain=bool,
-                                                                  doc='If True, the gurobi variable and constraint names '
-                                                                      'will match those of the pyomo variables and constrains. '
-                                                                      'Cannot be changed after set_instance is called.'))
-    CONFIG.declare('stream_solver', ConfigValue(default=False, domain=bool,
-                                                doc='If True, show the Gurobi output'))
+    CONFIG.declare('symbolic_solver_labels',
+                   ConfigValue(default=False, domain=bool,
+                               doc='If True, the gurobi variable and constraint names '
+                               'will match those of the pyomo variables and constrains. '
+                               'Cannot be changed after set_instance is called.'))
+    CONFIG.declare('stream_solver',
+                   ConfigValue(default=False, domain=bool,
+                               doc='If True, show the Gurobi output'))
     CONFIG.declare('check_for_updated_mutable_params_in_constraints',
-                   ImmutableConfigValue(default=True, domain=bool,
-                                        doc='If True, the solver interface will look for constraint coefficients that depend on '
-                                            'mutable parameters, and automatically update the coefficients for each solve. '
-                                            'Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True, domain=bool,
+                               doc='If True, the solver interface will look for constraint coefficients that depend on '
+                                   'mutable parameters, and automatically update the coefficients for each solve. '
+                                   'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_updated_mutable_params_in_objective',
-                   ImmutableConfigValue(default=True, domain=bool,
-                                        doc='If True, the solver interface will look for objective coefficients that depend on '
-                                            'mutable parameters, and automatically update the coefficients for each solve. '
-                                            'Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True, domain=bool,
+                               doc='If True, the solver interface will look for objective coefficients that depend on '
+                                   'mutable parameters, and automatically update the coefficients for each solve. '
+                                   'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_new_or_removed_constraints',
                    ConfigValue(default=True,
                                domain=bool,
@@ -313,22 +315,22 @@ class GurobiPersistentNew(MIPSolver):
                                doc='If True, the solver interface will update '
                                    'variable bounds each time solve is called.'))
     CONFIG.declare('update_named_expressions',
-                   ImmutableConfigValue(default=True,
-                                        domain=bool,
-                                        doc='If True, the solver interface will update '
-                                            'Expressions each time solve is called. '
-                                            'Cannot be changed after set_instance is called.'))
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will update '
+                                   'Expressions each time solve is called. '
+                                   'Cannot be changed after set_instance is called.'))
     CONFIG.declare('check_for_fixed_vars',
-                   ImmutableConfigValue(default=True,
-                                        domain=bool,
-                                        doc='If True, the solver interface will check for fixed '
-                                            'variables in each constraint that is added. If '
-                                            'The variable is fixed when the constraint gets '
-                                            'added and is later unfixed, the constraints will be '
-                                            'updated accordingly. If check_for_fixed_vars is False '
-                                            'and a variable is fixed when adding a constraint, the '
-                                            'constraint will not be updated correctly when the '
-                                            'variable is unfixed.'))
+                   ConfigValue(default=True,
+                               domain=bool,
+                               doc='If True, the solver interface will check for fixed '
+                                   'variables in each constraint that is added. If '
+                                   'The variable is fixed when the constraint gets '
+                                   'added and is later unfixed, the constraints will be '
+                                   'updated accordingly. If check_for_fixed_vars is False '
+                                   'and a variable is fixed when adding a constraint, the '
+                                   'constraint will not be updated correctly when the '
+                                   'variable is unfixed.'))
 
     __doc__ = add_docstring_list(__doc__, CONFIG)
 
@@ -371,6 +373,7 @@ class GurobiPersistentNew(MIPSolver):
         self._vars_added_since_update = ComponentSet()
         self._fixed_vars_to_dependent_cons_map = OrderedDict()  # pyomo var to set of constraints that were added when the var was fixed
         self._cons_with_fixed_vars = OrderedDict()  # pyomo constraint to ComponentSet of fixed vars in the constraint when it was added
+        self._config_locker = MarkImmutable()
 
         try:
             import gurobipy
@@ -491,16 +494,13 @@ class GurobiPersistentNew(MIPSolver):
         self._fixed_vars_to_dependent_cons_map = OrderedDict()  # pyomo var to set of constraints that were added when the var was fixed
         self._cons_with_fixed_vars = OrderedDict()  # pyomo constraint to ComponentSet of fixed vars in the constraint when it was added
 
+        self._config_locker.release_lock()
         self.config.set_value(config_options)
-        msg = ' can only be changed before set_instance is called or through the set_instance method'
-        self.config.get('symbolic_solver_labels')._mutable = False
-        self.config.get('symbolic_solver_labels')._immutable_error_message = 'symbolic_solver_labels' + msg
-        self.config.get('check_for_updated_mutable_params_in_constraints')._mutable = False
-        self.config.get('check_for_updated_mutable_params_in_constraints')._immutable_error_message = 'check_for_updated_mutable_params_in_constraints' + msg
-        self.config.get('check_for_updated_mutable_params_in_objective')._mutable = False
-        self.config.get('check_for_updated_mutable_params_in_objective')._immutable_error_message = 'check_for_updated_mutable_params_in_objective' + msg
-        self.config.get('update_named_expressions')._mutable = False
-        self.config.get('update_named_expressions')._immutable_error_message = 'update_named_expressions' + msg
+        self._config_locker = MarkImmutable(self.config.get('symbolic_solver_labels'),
+                                            self.config.get('check_for_updated_mutable_params_in_constraints'),
+                                            self.config.get('check_for_updated_mutable_params_in_objective'),
+                                            self.config.get('update_named_expressions'),
+                                            self.config.get('check_for_fixed_vars'))
 
         if self.config.symbolic_solver_labels:
             self._labeler = TextLabeler()
@@ -1161,6 +1161,7 @@ class GurobiPersistentNew(MIPSolver):
             slack[pyomo_con] = val
 
     def update(self):
+        # the use of config is broken here!!!
         if self._needs_updated:
             self._solver_model.update()
         if self.config.check_for_new_or_removed_vars or self.config.update_vars:
