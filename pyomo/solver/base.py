@@ -232,20 +232,16 @@ class SolutionLoader(SolutionLoaderBase):
         self._reduced_costs = reduced_costs
 
     def load_solution(self):
-        for v, val in self._primals.items():
-            v.value = val
+        self.load_vars()
 
         if hasattr(self._model, 'dual') and self._model.dual.import_enabled():
-            for c, val in self._duals.items():
-                self._model.dual[c] = val
+            self.load_suffix('dual')
 
         if hasattr(self._model, 'slack') and self._model.slack.import_enabled():
-            for c, val in self._slacks.items():
-                self._model.slack[c] = val
+            self.load_suffix('slack')
 
-        if hasattr(self._model, 'rc') and self._model.slack.import_enabled():
-            for v, val in self._reduced_costs.items():
-                self._model.rc[v] = val
+        if hasattr(self._model, 'rc') and self._model.rc.import_enabled():
+            self.load_suffix('rc')
 
     def load_suffix(self, suffix):
         if suffix == 'dual':

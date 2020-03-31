@@ -280,9 +280,6 @@ class GurobiPersistentNew(MIPSolver):
                                doc='If True, the gurobi variable and constraint names '
                                'will match those of the pyomo variables and constrains. '
                                'Cannot be changed after set_instance is called.'))
-    CONFIG.declare('stream_solver',
-                   ConfigValue(default=False, domain=bool,
-                               doc='If True, show the Gurobi output'))
     CONFIG.declare('check_for_updated_mutable_params_in_constraints',
                    ConfigValue(default=True, domain=bool,
                                doc='If True, the solver interface will look for constraint coefficients that depend on '
@@ -429,10 +426,14 @@ class GurobiPersistentNew(MIPSolver):
         return self._postsolve(tmp_config)
 
     def _apply_solver(self, options, config):
-        if config.stream_solver:
-            self._solver_model.setParam('OutputFlag', 1)
+        if config.tee:
+            options['OutputFlag'] = 1
         else:
-            self._solver_model.setParam('OutputFlag', 0)
+            options['OutputFlag'] = 0
+        if config.time_limit is not None:
+            options['TimeLimit'] = config.time_limit
+        if config.mip_gap is not None:
+            options['MIPGap'] = config.mip_gap
 
         for key, option in options.items():
             self._solver_model.setParam(key, option)

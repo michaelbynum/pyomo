@@ -139,7 +139,6 @@ class GurobiSolver_LP(GurobiSolver):
             TempfileManager.pop(remove=not config.keepfiles)
 
     def _apply_solver(self, model, options, config):
-        T = TicTocTimer()
         if not config.problemfile:
             config.problemfile = TempfileManager.create_tempfile(
                 suffix='.pyomo.lp')
@@ -149,7 +148,6 @@ class GurobiSolver_LP(GurobiSolver):
         if not config.solnfile:
             config.solnfile = TempfileManager.create_tempfile(
                 suffix='.gurobi.txt')
-        print(config.problemfile)
 
         # Gurobi can support certain problem features
         # writer_config = ProblemWriter_cpxlp.CONFIG()
@@ -161,41 +159,38 @@ class GurobiSolver_LP(GurobiSolver):
         # (skip_implicit alloes the config to have additional fields
         # that are ignored)
         # writer_config.set_value(config, skip_implicit=True)
-        T.toc("gurobi setup complete")
         writer = ProblemWriter_cpxlp()
         fname, symbol_map = writer(model=model,
                                    output_filename=config.problemfile,
                                    solver_capability=lambda x: True,
                                    io_options=dict())
         assert fname == str(config.problemfile)
-        T.toc("gurobi lp write complete")
 
         # Handle mapped options
         mipgap = config.mip_gap
+        timelim = config.time_limit
         if mipgap is not None:
             options['MIPGap'] = mipgap
+        if timelim is not None:
+            options['TimeLimit'] = timelim
         options['LogFile'] = config.logfile
 
         # Extract the suffixes
         suffixes = list(name for name, comp in active_import_suffix_generator(model))
 
         # Run Gurobi
-        data = pickle.dumps(
-            (config.problemfile,
-             config.solnfile,
-             {'warmstart_file': config.warmstart_file,
-              'relax_integrality': config.relax_integrality,},
-              options.value(),
-              suffixes), protocol=2)
-        timelim = config.time_limit
+        data = pickle.dumps((config.problemfile,
+                             config.solnfile,
+                             {'warmstart_file': config.warmstart_file,
+                              'relax_integrality': config.relax_integrality,},
+                             options.value(),
+                             suffixes), protocol=2)
         if timelim:
-            timelim + min(max(1, 0.01*self._timelim), 100)
-        cmd = [ str(config.executable),
-                os.path.join(this_file_dir(), 'GUROBI_RUN.py')]
+            timelim += min(max(1, 0.01*timelim), 100)
+        cmd = [str(config.executable),
+               os.path.join(this_file_dir(), 'GUROBI_RUN.py')]
         try:
-            T.toc("gurobi other preminaries done")
             rc, log = run(cmd, stdin=data, timelimit=timelim, tee=config.tee)
-            T.toc("gurobi subprocess complete")
         except WindowsError:
             raise ApplicationError(
                 'Could not execute the command: %s\tError message: %s'
@@ -291,5 +286,4 @@ class GurobiSolver_LP(GurobiSolver):
                                    'results.solver.termination_condition and '
                                    'resutls.found_feasible_solution() before loading a solution.')
 
-        T.toc("gurobi solution load complete")
         return results
