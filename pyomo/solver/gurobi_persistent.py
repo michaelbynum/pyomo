@@ -66,16 +66,16 @@ class GurobiPersistentSolutionLoader(SolutionLoaderBase):
     def load_solution(self):
         self._assert_solution_still_valid()
 
-        self._solver.load_vars()
+        self.load_vars()
 
         if hasattr(self._model, 'dual') and self._model.dual.import_enabled():
-            self._solver.load_duals()
+            self.load_suffix('dual')
 
         if hasattr(self._model, 'slack') and self._model.slack.import_enabled():
-            self._solver.load_slacks()
+            self.load_suffix('slack')
 
         if hasattr(self._model, 'rc') and self._model.rc.import_enabled():
-            self._solver.load_rc()
+            self.load_suffix('rc')
 
     def load_vars(self, vars_to_load=None, solution_number=0):
         self._assert_solution_still_valid()
@@ -523,7 +523,9 @@ class GurobiPersistentNew(MIPSolver):
         for con in block.component_data_objects(SOSConstraint, descend_into=True, active=True, sort=True):
             self.add_sos_constraint(con)
 
-        self.set_objective(_get_objective(block))
+        obj = _get_objective(block)
+        if obj is not None:
+            self.set_objective(obj)
 
     def remove_block(self, block):
         for con in block.component_data_objects(ctype=Constraint, descend_into=True, active=True, sort=True):
@@ -713,7 +715,7 @@ class GurobiPersistentNew(MIPSolver):
         self._needs_updated = True
 
     def add_sos_constraint(self, con):
-        assert con.active()
+        assert con.active
 
         conname = self._symbol_map.getSymbol(con, self._labeler)
         level = con.level
@@ -824,6 +826,7 @@ class GurobiPersistentNew(MIPSolver):
         del self._referenced_variables[id(var)]
         del self._pyomo_var_to_solver_var_map[id(var)]
         del self._solver_var_to_pyomo_var_map[id(solver_var)]
+        self._needs_updated = True
 
     def update_var(self, var):
         var_id = id(var)
@@ -879,33 +882,41 @@ class GurobiPersistentNew(MIPSolver):
             self._objective_expr = None
             self._obj_named_expressions = list()
 
-        if obj.active is False:
-            raise ValueError('Cannot add inactive objective to solver.')
-
-        if obj.sense == minimize:
+        if obj is None:
             sense = self._gurobipy.GRB.MINIMIZE
-        elif obj.sense == maximize:
-            sense = self._gurobipy.GRB.MAXIMIZE
-        else:
-            raise ValueError('Objective sense is not recognized: {0}'.format(obj.sense))
-
-        if self.config.check_for_updated_mutable_params_in_objective:
-            (gurobi_expr,
-             referenced_vars,
-             repn_constant,
-             mutable_linear_coefficients,
-             mutable_quadratic_coefficients) = self._get_expr_from_pyomo_expr(obj.expr)
-        else:
-            gurobi_expr = self._walker.walk_expression(obj.expr)
-            referenced_vars = self._walker.referenced_vars
+            gurobi_expr = 0
+            referenced_vars = ComponentSet()
             repn_constant = 0
             mutable_linear_coefficients = list()
             mutable_quadratic_coefficients = list()
+        else:
+            if obj.active is False:
+                raise ValueError('Cannot add inactive objective to solver.')
 
-        if self.config.update_named_expressions:
-            assert len(self._obj_named_expressions) == 0
-            for e in identify_components(obj.expr, {SimpleExpression, _GeneralExpressionData}):
-                self._obj_named_expressions.append((e, e.expr))
+            if obj.sense == minimize:
+                sense = self._gurobipy.GRB.MINIMIZE
+            elif obj.sense == maximize:
+                sense = self._gurobipy.GRB.MAXIMIZE
+            else:
+                raise ValueError('Objective sense is not recognized: {0}'.format(obj.sense))
+
+            if self.config.check_for_updated_mutable_params_in_objective:
+                (gurobi_expr,
+                 referenced_vars,
+                 repn_constant,
+                 mutable_linear_coefficients,
+                 mutable_quadratic_coefficients) = self._get_expr_from_pyomo_expr(obj.expr)
+            else:
+                gurobi_expr = self._walker.walk_expression(obj.expr)
+                referenced_vars = self._walker.referenced_vars
+                repn_constant = 0
+                mutable_linear_coefficients = list()
+                mutable_quadratic_coefficients = list()
+
+            if self.config.update_named_expressions:
+                assert len(self._obj_named_expressions) == 0
+                for e in identify_components(obj.expr, {SimpleExpression, _GeneralExpressionData}):
+                    self._obj_named_expressions.append((e, e.expr))
 
         mutable_constant = _MutableConstant()
         mutable_constant.expr = repn_constant
@@ -1157,6 +1168,7 @@ class GurobiPersistentNew(MIPSolver):
 
     def update(self):
         self._update(self.config)
+        self._update_gurobi_model()
 
     def _update(self, config):
         # the use of config is broken here!!!
@@ -1231,13 +1243,13 @@ class GurobiPersistentNew(MIPSolver):
         if not (pyomo_obj is self._objective):
             self.set_objective(pyomo_obj)
             already_called_set_objective = True
-        if (not already_called_set_objective) and (not (pyomo_obj.expr is self._objective_expr)):
-            self._set_objective(pyomo_obj)
+        if (not already_called_set_objective) and (pyomo_obj is not None) and (pyomo_obj.expr is not self._objective_expr):
+            self.set_objective(pyomo_obj)
             already_called_set_objective = True
         if (not already_called_set_objective) and config.update_named_expressions:
             for named_expr, old_expr in self._obj_named_expressions:
                 if not (named_expr.expr is old_expr):
-                    self._set_objective(pyomo_obj)
+                    self.set_objective(pyomo_obj)
                     already_called_set_objective = True
                     break
         if (not already_called_set_objective) and config.check_for_updated_mutable_params_in_objective:
@@ -1352,7 +1364,7 @@ class GurobiPersistentNew(MIPSolver):
             The attribute to get. See gurobi documentation
         """
         if self._needs_updated:
-            self._update()
+            self._update_gurobi_model()
         return self._pyomo_var_to_solver_var_map[id(var)].getAttr(attr)
 
     def get_linear_constraint_attr(self, con, attr):
@@ -1368,7 +1380,7 @@ class GurobiPersistentNew(MIPSolver):
             The attribute to get. See the Gurobi documentation
         """
         if self._needs_updated:
-            self._update()
+            self._update_gurobi_model()
         return self._pyomo_con_to_solver_con_map[con].getAttr(attr)
 
     def get_sos_attr(self, con, attr):
@@ -1384,7 +1396,7 @@ class GurobiPersistentNew(MIPSolver):
             The attribute to get. See the Gurobi documentation
         """
         if self._needs_updated:
-            self._update()
+            self._update_gurobi_model()
         return self._pyomo_sos_to_solver_sos_map[con].getAttr(attr)
 
     def get_quadratic_constraint_attr(self, con, attr):
@@ -1400,7 +1412,7 @@ class GurobiPersistentNew(MIPSolver):
             The attribute to get. See the Gurobi documentation
         """
         if self._needs_updated:
-            self._update()
+            self._update_gurobi_model()
         return self._pyomo_con_to_solver_con_map[con].getAttr(attr)
 
     def set_gurobi_param(self, param, val):
