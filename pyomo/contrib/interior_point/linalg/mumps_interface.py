@@ -48,7 +48,7 @@ class MumpsInterface(LinearSolverInterface):
         self.allow_reallocation = allow_reallocation
         self._prev_allocation = None
         # Max number of reallocations per iteration:
-        self.max_num_realloc = 2
+        self.max_num_realloc = 5
         # TODO: Should probably set more reallocation options here,
         #       and allow the user to specify them.
         #       (e.g. max memory usage)
