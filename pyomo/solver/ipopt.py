@@ -9,14 +9,25 @@
 #  ___________________________________________________________________________
 
 from pyutilib.services import TempfileManager
-
-from pyomo.common.config import (
-    ConfigBlock, ConfigList, ConfigValue, add_docstring_list, Path
-)
+from pyomo.common.config import (ConfigBlock,
+                                 ConfigList,
+                                 ConfigValue,
+                                 add_docstring_list,
+                                 Path)
 from pyomo.common.fileutils import Executable
-from pyomo.solver.base import Solver, SolverResults
+from pyomo.solver.base import Solver
+from pyomo.opt.base.solvers import SolverFactory
+import logging
+import io
+import subprocess
+from pyomo.repn.plugins.ampl.ampl_ import ProblemWriter_nl
+from pyomo.core.base.suffix import active_import_suffix_generator
 
 
+logger = logging.getLogger(__name__)
+
+
+@SolverFactory.register('NEW_ipopt', doc='Interface to Ipopt')
 class IpoptSolver(Solver):
     CONFIG = Solver.CONFIG()
 
@@ -24,8 +35,8 @@ class IpoptSolver(Solver):
         if cls != IpoptSolver:
             return super(IpoptSolver, cls).__new__(cls, **kwargs)
 
-        solver_io = kwds.pop('solver_io', 'nl')
-        if config.solver_io == 'nl':
+        solver_io = kwargs.pop('solver_io', 'nl')
+        if solver_io == 'nl':
             return IpoptSolver_NL(**kwargs)
         else:
             raise ValueError("Invalid solver_io for IpoptSolver: %s"
@@ -61,27 +72,32 @@ class IpoptSolver_NL(IpoptSolver):
         """
         return self.available()
 
-    def solve(self, model, options=None, **config_options):
-        """
-        Solve a model
+    def version(self):
+        assert self.available()
+        cp = subprocess.run([str(self.config.executable), '--version'],
+                            capture_output=True, text=True)
+        version = cp.stdout.split()[1]
+        version = version.split('.')
+        version = tuple(int(i) for i in version)
+        return version
 
-        """
+    def solve(self, model, options=None, **config_options):
+        """Solve a model""" + add_docstring_list("", IpoptSolver_NL.CONFIG)
 
         options = self.options(options)
         config = self.config(config_options)
 
         try:
             TempfileManager.push()
-            return self._apply_solver(model, options, confg)
+            return self._apply_solver(model, options, config)
         finally:
             # finally, clean any temporary files registered with the
             # temp file manager, created/populated *directly* by this
             # plugin.
             TempfileManager.pop(remove=not config.keepfiles)
 
-
     def _apply_solver(self, model, options, config):
-        if not config.problemfile is None:
+        if not config.problemfile:
             config.problemfile = TempfileManager.create_tempfile(
                 suffix='.pyomo.nl')
         if not config.logfile:
@@ -92,19 +108,24 @@ class IpoptSolver_NL(IpoptSolver):
                 suffix='.ipopt.sol')
 
         # Write out the model
-        writer = WriterFactory(config.solver_io)
-        fname, symbol_map = writer(
-            model=model,
-            output_filename=config.problemfile.path(),
-            solver_capability=lambda x: True,
-            io_options=config.io_options
-        )
+        writer = ProblemWriter_nl()
+        fname, symbol_map = writer(model=model,
+                                   filename=config.problemfile,
+                                   solver_capability=lambda x: True,
+                                   io_options=dict())
         assert fname == str(config.problemfile)
 
-
         # Extract Suffixes
+        suffixes = list(name for name, comp in active_import_suffix_generator(model))
 
         # Run Ipopt
+        cp = subprocess.run([str(config.executable),
+                             '-o'+config.solnfile,
+                             config.problemfile],
+                            capture_output=True,
+                            text=True,
+                            timeout=config.time_limit)
+
         data = json.dumps(
             (config.problemfile,
              config.solnfile,
