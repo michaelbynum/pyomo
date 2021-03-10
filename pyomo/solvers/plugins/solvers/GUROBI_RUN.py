@@ -16,8 +16,9 @@ import re
 This script is run using the Gurobi/system python. Do not assume any third party packages
 are available!
 """
-from gurobipy import gurobi, read, GRB
+from gurobipy import gurobi, read, GRB, Model
 import sys
+import time
 if sys.version_info[0] < 3:
     from itertools import izip as zip
 
@@ -58,6 +59,14 @@ def gurobi_run(model_file, warmstart_file, soln_file, mipgap, options, suffixes)
             return
 
     # Load the lp model
+    license_check_time_0 = time.time()
+    tmp_m = Model()
+    license_check_time_1 = time.time()
+    license_check_time = license_check_time_1 - license_check_time_0
+    f = open('license_check_time.txt', 'w')
+    f.write(str(license_check_time))
+    f.close()
+
     model = read(model_file)
 
     # if the use wants to extract duals or reduced costs and the
@@ -335,3 +344,4 @@ def gurobi_run(model_file, warmstart_file, soln_file, mipgap, options, suffixes)
                     solnfile.write("constraintslack: %s : %s\n" % (str(name), str(val)))
 
     solnfile.close()
+
