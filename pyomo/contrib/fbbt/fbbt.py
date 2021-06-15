@@ -1402,8 +1402,7 @@ def _fbbt_block(m, config):
     var_lbs = ComponentMap()
     var_ubs = ComponentMap()
     n_cons = 0
-    for c in m.component_data_objects(ctype=Constraint, active=True,
-                                      descend_into=True, sort=True):
+    for c in m.component_data_objects(ctype=Constraint, active=True, descend_into=True):
         for v in identify_variables(c.body):
             if v not in var_to_con_map:
                 var_to_con_map[v] = list()
@@ -1426,22 +1425,24 @@ def _fbbt_block(m, config):
 
     n_fbbt = 0
 
-    improved_vars = ComponentSet()
-    for c in m.component_data_objects(ctype=Constraint, active=True,
-                                      descend_into=True, sort=True):
-        _new_var_bounds = _fbbt_con(c, config)
-        n_fbbt += 1
-        new_var_bounds.update(_new_var_bounds)
-        for v, bnds in _new_var_bounds.items():
-            vlb, vub = bnds
-            if vlb is not None:
-                if vlb > var_lbs[v] + config.improvement_tol:
-                    improved_vars.add(v)
-                    var_lbs[v] = vlb
-            if vub is not None:
-                if vub < var_ubs[v] - config.improvement_tol:
-                    improved_vars.add(v)
-                    var_ubs[v] = vub
+    if config.seed_variable is None:
+        improved_vars = ComponentSet()
+        for c in m.component_data_objects(ctype=Constraint, active=True, descend_into=True):
+            _new_var_bounds = _fbbt_con(c, config)
+            n_fbbt += 1
+            new_var_bounds.update(_new_var_bounds)
+            for v, bnds in _new_var_bounds.items():
+                vlb, vub = bnds
+                if vlb is not None:
+                    if vlb > var_lbs[v] + config.improvement_tol:
+                        improved_vars.add(v)
+                        var_lbs[v] = vlb
+                if vub is not None:
+                    if vub < var_ubs[v] - config.improvement_tol:
+                        improved_vars.add(v)
+                        var_ubs[v] = vub
+    else:
+        improved_vars = ComponentSet([config.seed_variable])
 
     while len(improved_vars) > 0:
         if n_fbbt >= n_cons * config.max_iter:
@@ -1466,7 +1467,7 @@ def _fbbt_block(m, config):
 
 
 def fbbt(comp, deactivate_satisfied_constraints=False, integer_tol=1e-5, feasibility_tol=1e-8, max_iter=10,
-         improvement_tol=1e-4):
+         improvement_tol=1e-4, seed_variable=None):
     """
     Perform FBBT on a constraint, block, or model. For more control,
     use _fbbt_con and _fbbt_block. For detailed documentation, see
@@ -1501,6 +1502,7 @@ def fbbt(comp, deactivate_satisfied_constraints=False, integer_tol=1e-5, feasibi
         every constraint in the Block. We then attempt to identify which constraints to repeat FBBT on based on the
         improvement in variable bounds. If the bounds on a variable improve by more than improvement_tol, then FBBT
         is performed on the constraints using that Var.
+    seed_variable: pyomo.core.base.var.Var
 
     Returns
     -------
@@ -1519,6 +1521,7 @@ def fbbt(comp, deactivate_satisfied_constraints=False, integer_tol=1e-5, feasibi
     config.declare('feasibility_tol', ft_config)
     config.declare('max_iter', mi_config)
     config.declare('improvement_tol', improvement_tol_config)
+    config.declare('seed_variable', ConfigValue(default=seed_variable))
 
     new_var_bounds = ComponentMap()
     if comp.ctype == Constraint:
