@@ -128,3 +128,12 @@ class ComponentSet(collections_MutableSet):
         except KeyError:
             raise KeyError("Component with id '%s': %s"
                            % (id(val), str(val)))
+
+    def intersection(self, other):
+        res = ComponentSet([i for i in self if i in other])
+        return res
+
+    def union(self, other):
+        res = ComponentSet(self)
+        res.update(other)
+        return res
