@@ -10,19 +10,19 @@
 #
 # Unit Tests for components
 #
-from six import StringIO
-import pyutilib.th as unittest
+from io import StringIO
+import pyomo.common.unittest as unittest
 
 from pyomo.common import DeveloperError
-import pyomo.core.base._pyomo
 from pyomo.environ import (
-    ConcreteModel, Component, Block, Var, Set, Param,
+    ConcreteModel, Component, Block, Var, Set, ModelComponentFactory
 )
+from pyomo.core.base.set import GlobalSets
 
 class TestComponent(unittest.TestCase):
 
     def test_construct_component_throws_exception(self):
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 DeveloperError,
                 "Must specify a component type for class Component"):
             Component()
@@ -95,18 +95,24 @@ class TestComponent(unittest.TestCase):
                     '2 :  None :  None :  None : False :  True :  Reals\n'
         self.assertEqual(correct_s, stream.getvalue())
 
+    def test_is_reference(self):
+        m = ConcreteModel()
+        class _NotSpecified(object):
+            pass
+        m.comp = Component(ctype=_NotSpecified)
+        self.assertFalse(m.comp.is_reference())
 
 class TestEnviron(unittest.TestCase):
 
     def test_components(self):
         self.assertGreaterEqual(
-            set(x[0] for x in pyomo.core.base._pyomo.model_components()),
+            set(ModelComponentFactory),
             set(['Set', 'Param', 'Var', 'Objective', 'Constraint'])
         )
 
     def test_sets(self):
         self.assertGreaterEqual(
-            set(x[0] for x in pyomo.core.base._pyomo.predefined_sets()),
+            set(GlobalSets),
             set(['Reals', 'Integers', 'Boolean'])
         )
 

@@ -27,15 +27,19 @@ from pyomo.opt import TerminationCondition as tc
 def solve_disjunctive_subproblem(mip_result, solve_data, config):
     """Set up and solve the disjunctive subproblem."""
     if config.force_subproblem_nlp:
-        if config.strategy == "LOA":
+        if config.strategy in {"LOA", "RIC"}:
             return solve_local_NLP(mip_result.var_values, solve_data, config)
         elif config.strategy == 'GLOA':
             return solve_global_subproblem(mip_result, solve_data, config)
+        else:
+            raise ValueError('Unrecognized strategy: ' + config.strategy)
     else:
-        if config.strategy == "LOA":
+        if config.strategy in {"LOA", "RIC"}:
             return solve_local_subproblem(mip_result, solve_data, config)
         elif config.strategy == 'GLOA':
             return solve_global_subproblem(mip_result, solve_data, config)
+        else:
+            raise ValueError('Unrecognized strategy: ' + config.strategy)
 
 
 def solve_linear_subproblem(mip_model, solve_data, config):
@@ -419,9 +423,9 @@ def solve_local_subproblem(mip_result, solve_data, config):
             )
         else:
             if config.round_discrete_vars:
-                disj.indicator_var.fix(rounded_val)
+                disj.indicator_var.fix(bool(rounded_val))
             else:
-                disj.indicator_var.fix(val)
+                disj.indicator_var.fix(bool(val))
 
     if config.force_subproblem_nlp:
         # We also need to copy over the discrete variable values
@@ -488,9 +492,9 @@ def solve_global_subproblem(mip_result, solve_data, config):
             )
         else:
             if config.round_discrete_vars:
-                disj.indicator_var.fix(rounded_val)
+                disj.indicator_var.fix(bool(rounded_val))
             else:
-                disj.indicator_var.fix(val)
+                disj.indicator_var.fix(bool(val))
 
     if config.force_subproblem_nlp:
         # We also need to copy over the discrete variable values

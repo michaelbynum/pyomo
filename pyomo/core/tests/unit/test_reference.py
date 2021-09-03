@@ -15,18 +15,19 @@ import os
 from os.path import abspath, dirname
 currdir = dirname(abspath(__file__))+os.sep
 
-import pyutilib.th as unittest
-from six import itervalues, StringIO, iterkeys, iteritems
+import pyomo.common.unittest as unittest
+from io import StringIO
 
 from pyomo.environ import (
     ConcreteModel, Block, Var, Set, RangeSet, Param, value,
 )
-from pyomo.common.collections import OrderedDict, ComponentSet
+from pyomo.common.collections import ComponentSet
 from pyomo.core.base.var import IndexedVar
 from pyomo.core.base.set import SetProduct, UnorderedSetOf
 from pyomo.core.base.indexed_component import (
     UnindexedComponent_set, IndexedComponent
 )
+from pyomo.core.base.indexed_component_slice import IndexedComponent_slice
 from pyomo.core.base.reference import (
     _ReferenceDict, _ReferenceSet, Reference
 )
@@ -123,16 +124,16 @@ class TestReferenceDict(unittest.TestCase):
         rd = _ReferenceDict(m.b[:,4].x[8,:])
 
         self.assertEqual(
-            list(iterkeys(rd)),
+            list(rd.keys()),
             [(1,10), (1,11), (2,10), (2,11)]
         )
         self.assertEqual(
-            list(itervalues(rd)),
+            list(rd.values()),
             [m.b[1,4].x[8,10], m.b[1,4].x[8,11],
              m.b[2,4].x[8,10], m.b[2,4].x[8,11]]
         )
         self.assertEqual(
-            list(iteritems(rd)),
+            list(rd.items()),
             [((1,10), m.b[1,4].x[8,10]),
              ((1,11), m.b[1,4].x[8,11]),
              ((2,10), m.b[2,4].x[8,10]),
@@ -143,94 +144,94 @@ class TestReferenceDict(unittest.TestCase):
         m = self.m
 
         rd = _ReferenceDict(m.b[:,:].x[:,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[1,5,7,10] = 10
         self.assertEqual( m.b[1,5].x[7,10].value, 10 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 10 )
+        self.assertEqual( sum(x.value for x in rd.values()), 10 )
 
         rd = _ReferenceDict(m.b[:,4].x[8,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[1,10] = 20
         self.assertEqual( m.b[1,4].x[8,10].value, 20 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 20 )
+        self.assertEqual( sum(x.value for x in rd.values()), 20 )
 
     def test_attribute_assignment(self):
         m = self.m
 
         rd = _ReferenceDict(m.b[:,:].x[:,:].value)
-        self.assertEqual( sum(x for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x for x in rd.values()), 0 )
         rd[1,5,7,10] = 10
         self.assertEqual( m.b[1,5].x[7,10].value, 10 )
-        self.assertEqual( sum(x for x in itervalues(rd)), 10 )
+        self.assertEqual( sum(x for x in rd.values()), 10 )
 
         rd = _ReferenceDict(m.b[:,4].x[8,:].value)
-        self.assertEqual( sum(x for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x for x in rd.values()), 0 )
         rd[1,10] = 20
         self.assertEqual( m.b[1,4].x[8,10].value, 20 )
-        self.assertEqual( sum(x for x in itervalues(rd)), 20 )
+        self.assertEqual( sum(x for x in rd.values()), 20 )
 
         m.x = Var([1,2], initialize=0)
         rd = _ReferenceDict(m.x[:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[2] = 10
         self.assertEqual( m.x[1].value, 0 )
         self.assertEqual( m.x[2].value, 10 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 10 )
+        self.assertEqual( sum(x.value for x in rd.values()), 10 )
 
     def test_single_attribute_assignment(self):
         m = self.m
 
         rd = _ReferenceDict(m.b[1,5].x[:,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[7,10].value = 10
         self.assertEqual( m.b[1,5].x[7,10].value, 10 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 10 )
+        self.assertEqual( sum(x.value for x in rd.values()), 10 )
 
         rd = _ReferenceDict(m.b[1,4].x[8,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[10].value = 20
         self.assertEqual( m.b[1,4].x[8,10].value, 20 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 20 )
+        self.assertEqual( sum(x.value for x in rd.values()), 20 )
 
     def test_nested_attribute_assignment(self):
         m = self.m
 
         rd = _ReferenceDict(m.b[:,:].x[:,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[1,5,7,10].value = 10
         self.assertEqual( m.b[1,5].x[7,10].value, 10 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 10 )
+        self.assertEqual( sum(x.value for x in rd.values()), 10 )
 
         rd = _ReferenceDict(m.b[:,4].x[8,:])
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 0 )
+        self.assertEqual( sum(x.value for x in rd.values()), 0 )
         rd[1,10].value = 20
         self.assertEqual( m.b[1,4].x[8,10].value, 20 )
-        self.assertEqual( sum(x.value for x in itervalues(rd)), 20 )
+        self.assertEqual( sum(x.value for x in rd.values()), 20 )
 
     def test_single_deletion(self):
         m = self.m
 
         rd = _ReferenceDict(m.b[1,5].x[:,:])
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2)
         self.assertTrue((7,10) in rd)
         del rd[7,10]
         self.assertFalse((7,10) in rd)
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 3)
+        self.assertEqual(len(list(x.value for x in rd.values())), 3)
 
         rd = _ReferenceDict(m.b[1,4].x[8,:])
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2)
         self.assertTrue((10) in rd)
         del rd[10]
         self.assertFalse(10 in rd)
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2-1)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2-1)
 
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 KeyError,
                 r"\(8, 10\) is not valid for indexed component 'b\[1,4\].x'"):
             del rd[10]
 
         rd = _ReferenceDict(m.b[1,:].x[8,0])
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 KeyError,
                 r"'\(8, 0\)' is not valid for indexed component 'b\[1,4\].x'"):
             del rd[4]
@@ -240,25 +241,25 @@ class TestReferenceDict(unittest.TestCase):
         m = self.m
 
         rd = _ReferenceDict(m.b[:,:].x[:,:])
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2*2*2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2*2*2)
         self.assertTrue((1,5,7,10) in rd)
         del rd[1,5,7,10]
         self.assertFalse((1,5,7,10) in rd)
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2*2*2-1)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2*2*2-1)
 
         rd = _ReferenceDict(m.b[:,4].x[8,:])
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2)
         self.assertTrue((1,10) in rd)
         del rd[1,10]
         self.assertFalse((1,10) in rd)
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2-1)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2-1)
 
     def test_attribute_deletion(self):
         m = self.m
 
         rd = _ReferenceDict(m.b[:,:].z)
         rd._slice.attribute_errors_generate_exceptions = False
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2*2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2*2)
         self.assertTrue((1,5) in rd)
         self.assertTrue( hasattr(m.b[1,5], 'z') )
         self.assertTrue( hasattr(m.b[2,5], 'z') )
@@ -266,11 +267,11 @@ class TestReferenceDict(unittest.TestCase):
         self.assertFalse((1,5) in rd)
         self.assertFalse( hasattr(m.b[1,5], 'z') )
         self.assertTrue( hasattr(m.b[2,5], 'z') )
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 3)
+        self.assertEqual(len(list(x.value for x in rd.values())), 3)
 
         rd = _ReferenceDict(m.b[2,:].z)
         rd._slice.attribute_errors_generate_exceptions = False
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2)
         self.assertTrue(5 in rd)
         self.assertTrue( hasattr(m.b[2,4], 'z') )
         self.assertTrue( hasattr(m.b[2,5], 'z') )
@@ -278,7 +279,7 @@ class TestReferenceDict(unittest.TestCase):
         self.assertFalse(5 in rd)
         self.assertTrue( hasattr(m.b[2,4], 'z') )
         self.assertFalse( hasattr(m.b[2,5], 'z') )
-        self.assertEqual(len(list(x.value for x in itervalues(rd))), 2-1)
+        self.assertEqual(len(list(x.value for x in rd.values())), 2-1)
 
 class TestReferenceSet(unittest.TestCase):
     def test_lookup_and_iter_dense_data(self):
@@ -370,22 +371,22 @@ class TestReference(unittest.TestCase):
         m = ConcreteModel()
         m.x = Var([1,2])
         class Foo(object): pass
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             TypeError,
             "First argument to Reference constructors must be a "
-            "component, component slice, Sequence, or Mapping \(received Foo",
+            r"component, component slice, Sequence, or Mapping \(received Foo",
             Reference, Foo()
             )
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             TypeError,
             "First argument to Reference constructors must be a "
-            "component, component slice, Sequence, or Mapping \(received int",
+            r"component, component slice, Sequence, or Mapping \(received int",
             Reference, 5
             )
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             TypeError,
             "First argument to Reference constructors must be a "
-            "component, component slice, Sequence, or Mapping \(received None",
+            r"component, component slice, Sequence, or Mapping \(received None",
             Reference, None
             )
 
@@ -803,6 +804,57 @@ class TestReference(unittest.TestCase):
                 KeyError, "Index '1' is not valid for indexed component 'r'"):
             m.r[1] = m.x
 
+    def test_is_reference(self):
+        m = ConcreteModel()
+        m.v0 = Var()
+        m.v1 = Var([1,2,3])
+
+        m.ref0 = Reference(m.v0)
+        m.ref1 = Reference(m.v1)
+
+        self.assertFalse(m.v0.is_reference())
+        self.assertFalse(m.v1.is_reference())
+
+        self.assertTrue(m.ref0.is_reference())
+        self.assertTrue(m.ref1.is_reference())
+
+        unique_vars = list(
+                v for v in m.component_objects(Var) if not v.is_reference())
+        self.assertEqual(len(unique_vars), 2)
+
+    def test_referent(self):
+        m = ConcreteModel()
+        m.v0 = Var()
+        m.v2 = Var([1, 2, 3],['a', 'b'])
+
+        varlist = [m.v2[1, 'a'], m.v2[1, 'b']]
+
+        vardict = {
+                0: m.v0, 
+                1: m.v2[1, 'a'],
+                2: m.v2[2, 'a'],
+                3: m.v2[3, 'a'],
+                }
+
+        scalar_ref = Reference(m.v0)
+        self.assertIs(scalar_ref.referent, m.v0)
+
+        sliced_ref = Reference(m.v2[:,'a'])
+        referent = sliced_ref.referent
+        self.assertIs(type(referent), IndexedComponent_slice)
+        self.assertEqual(len(referent._call_stack), 1)
+        call, info = referent._call_stack[0]
+        self.assertEqual(call, IndexedComponent_slice.slice_info)
+        self.assertIs(info[0], m.v2)
+        self.assertEqual(info[1], {1: 'a'}) # Fixed
+        self.assertEqual(info[2], {0: slice(None)}) # Sliced
+        self.assertIs(info[3], None) # Ellipsis
+
+        list_ref = Reference(varlist)
+        self.assertIs(list_ref.referent, varlist)
+
+        dict_ref = Reference(vardict)
+        self.assertIs(dict_ref.referent, vardict)
 
 if __name__ == "__main__":
     unittest.main()

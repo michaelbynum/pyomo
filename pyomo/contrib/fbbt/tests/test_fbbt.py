@@ -8,16 +8,17 @@
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
-import pyutilib.th as unittest
+import pyomo.common.unittest as unittest
 import pyomo.environ as pyo
 from pyomo.contrib.fbbt.fbbt import fbbt, compute_bounds_on_expr
 from pyomo.common.dependencies import numpy as np, numpy_available
+from pyomo.common.log import LoggingIntercept
 from pyomo.common.errors import InfeasibleConstraintException
 from pyomo.core.expr.numeric_expr import (ProductExpression,
-                                          UnaryFunctionExpression)
+                                          UnaryFunctionExpression,
+                                          LinearExpression)
 import math
-import logging
-import io
+from io import StringIO
 
 
 class DummyExpr(ProductExpression):
@@ -236,10 +237,9 @@ class TestFBBT(unittest.TestCase):
                     yu = np.inf
                 else:
                     yu = m.y.ub
-                for _x in x:
-                    _y = np.exp(np.log(abs(z)) / _x)
-                    self.assertTrue(np.all(yl <= _y))
-                    self.assertTrue(np.all(yu >= _y))
+                y = np.exp(np.split(np.log(np.abs(z)), len(z)) / x)
+                self.assertTrue(np.all(yl <= y))
+                self.assertTrue(np.all(yu >= y))
 
     def test_x_sq(self):
         m = pyo.ConcreteModel()
@@ -727,7 +727,6 @@ class TestFBBT(unittest.TestCase):
         self.assertEqual(lb, None)
         self.assertEqual(ub, None)
 
-    @unittest.skip('This test passes locally, but not on travis or appveyor. I will add an issue.')
     def test_skip_unknown_expression1(self):
 
         m = pyo.ConcreteModel()
@@ -735,25 +734,17 @@ class TestFBBT(unittest.TestCase):
         m.y = pyo.Var()
         expr = DummyExpr([m.x, m.y])
         m.c = pyo.Constraint(expr=expr == 1)
-        logging_io = io.StringIO()
-        handler = logging.StreamHandler(stream=logging_io)
-        handler.setLevel(logging.WARNING)
-        logger = logging.getLogger('pyomo.contrib.fbbt.fbbt')
-        logger.addHandler(handler)
-        new_bounds = fbbt(m)
-        handler.flush()
+
+        OUT = StringIO()
+        with LoggingIntercept(OUT, 'pyomo.contrib.fbbt.fbbt'):
+            new_bounds = fbbt(m)
+
         self.assertEqual(pyo.value(m.x.lb), 1)
         self.assertEqual(pyo.value(m.x.ub), 1)
         self.assertEqual(pyo.value(m.y.lb), None)
         self.assertEqual(pyo.value(m.y.ub), None)
-        a = "Unsupported expression type for FBBT"
-        b = logging_io.getvalue()
-        a = a.strip()
-        b = b.strip()
-        self.assertTrue(b.startswith(a))
-        logger.removeHandler(handler)
+        self.assertIn("Unsupported expression type for FBBT", OUT.getvalue())
 
-    @unittest.skip('This test passes locally, but not on travis or appveyor. I will add an issue.')
     def test_skip_unknown_expression2(self):
         def dummy_unary_expr(x):
             return 0.5*x
@@ -762,21 +753,14 @@ class TestFBBT(unittest.TestCase):
         m.x = pyo.Var(bounds=(0,4))
         expr = UnaryFunctionExpression((m.x,), name='dummy_unary_expr', fcn=dummy_unary_expr)
         m.c = pyo.Constraint(expr=expr == 1)
-        logging_io = io.StringIO()
-        handler = logging.StreamHandler(stream=logging_io)
-        handler.setLevel(logging.WARNING)
-        logger = logging.getLogger('pyomo.contrib.fbbt.fbbt')
-        logger.addHandler(handler)
-        new_bounds = fbbt(m)
-        handler.flush()
+
+        OUT = StringIO()
+        with LoggingIntercept(OUT, 'pyomo.contrib.fbbt.fbbt'):
+            new_bounds = fbbt(m)
+
         self.assertEqual(pyo.value(m.x.lb), 0)
         self.assertEqual(pyo.value(m.x.ub), 4)
-        a = "Unsupported expression type for FBBT"
-        b = logging_io.getvalue()
-        a = a.strip()
-        b = b.strip()
-        self.assertTrue(b.startswith(a))
-        logger.removeHandler(handler)
+        self.assertIn("Unsupported expression type for FBBT", OUT.getvalue())
 
     def test_compute_expr_bounds(self):
         m = pyo.ConcreteModel()
@@ -827,3 +811,43 @@ class TestFBBT(unittest.TestCase):
         self.assertAlmostEqual(m.x.ub, xu)
         self.assertAlmostEqual(m.y.lb, yl)
         self.assertAlmostEqual(m.y.ub, yu)
+
+    def test_negative_power(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var()
+        m.y = pyo.Var()
+        e = (m.x**2 + m.y**2)**(-0.5)
+        lb, ub = compute_bounds_on_expr(e)
+        self.assertAlmostEqual(lb, 0)
+        self.assertIsNone(ub)
+
+    def test_linear_expression(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var(bounds=(1, 2))
+        m.y = pyo.Var()
+        m.p = pyo.Param(initialize=3, mutable=True)
+        e = LinearExpression(constant=1, linear_coefs=[1, m.p - 1], linear_vars=[m.x, m.y])
+        m.c = pyo.Constraint(expr=e == 0)
+        fbbt(m.c)
+        self.assertAlmostEqual(m.y.lb, -1.5)
+        self.assertAlmostEqual(m.y.ub, -1)
+
+    def test_quadratic_as_product(self):
+        m = pyo.ConcreteModel()
+        m.x = pyo.Var([1, 2], bounds=(-2, 6))
+
+        e1 = m.x[1]*m.x[1] + m.x[2]*m.x[2]
+        e2 = m.x[1]**2 + m.x[2]**2
+
+        lb1, ub1 = compute_bounds_on_expr(e1)
+        lb2, ub2 = compute_bounds_on_expr(e2)
+
+        self.assertAlmostEqual(lb1, lb2)
+        self.assertAlmostEqual(ub1, ub2)
+
+        m.c = pyo.Constraint(expr=m.x[1]*m.x[1] + m.x[2]*m.x[2] == 0)
+        fbbt(m.c)
+        self.assertAlmostEqual(m.x[1].lb, 0)
+        self.assertAlmostEqual(m.x[1].ub, 0)
+        self.assertAlmostEqual(m.x[2].lb, 0)
+        self.assertAlmostEqual(m.x[2].ub, 0)

@@ -7,9 +7,10 @@
 #  rights in this software.
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
+
 import copy
-from six import iteritems, iterkeys, advance_iterator
 from pyomo.common import DeveloperError
+
 
 class IndexedComponent_slice(object):
     """Special class for slicing through hierarchical component trees
@@ -23,17 +24,20 @@ class IndexedComponent_slice(object):
     calls to __getitem__ / __getattr__ / __call__ happen *before* the
     call to __iter__()
     """
-    ATTR_MASK = 4
-    ITEM_MASK = 8
-    CALL_MASK = 16
+    ATTR_MASK = 8
+    ITEM_MASK = 16
+    CALL_MASK = 32
+    GET_MASK = 1
+    SET_MASK = 2
+    DEL_MASK = 4
 
     slice_info = 0
-    get_attribute = ATTR_MASK | 1
-    set_attribute = ATTR_MASK | 2
-    del_attribute = ATTR_MASK | 3
-    get_item = ITEM_MASK | 1
-    set_item = ITEM_MASK | 2
-    del_item = ITEM_MASK | 3
+    get_attribute = ATTR_MASK | GET_MASK
+    set_attribute = ATTR_MASK | SET_MASK
+    del_attribute = ATTR_MASK | DEL_MASK
+    get_item = ITEM_MASK | GET_MASK
+    set_item = ITEM_MASK | SET_MASK
+    del_item = ITEM_MASK | DEL_MASK
     call = CALL_MASK
 
     def __init__(self, component, fixed=None, sliced=None, ellipsis=None):
@@ -118,7 +122,7 @@ class IndexedComponent_slice(object):
     def __setstate__(self, state):
         """Deserialize the state into this object. """
         set_attr = super(IndexedComponent_slice, self).__setattr__
-        for k,v in iteritems(state):
+        for k,v in state.items():
             set_attr(k,v)
 
     def __deepcopy__(self, memo):
@@ -276,25 +280,20 @@ class IndexedComponent_slice(object):
         return ((_iter.get_last_index(), _) for _ in _iter)
 
 
-def _tuple_from_possible_scalar(source):
-    if type(source) is not tuple:
-        # This will behave poorly for non-tuple,
-        # non-string iterables, but we do not
-        # expect non-tuple, non-string iterables.
-        return (source,)
-    return source
-
 def _freeze(info):
     if info[0] == IndexedComponent_slice.slice_info:
         return (
             info[0],
             id(info[1][0]),  # id of the Component
-            tuple(iteritems(info[1][1])), # {idx: value} for fixed
-            tuple(iterkeys(info[1][2])),  # {idx: slice} for slices
+            tuple(info[1][1].items()), # {idx: value} for fixed
+            tuple(info[1][2].keys()),  # {idx: slice} for slices
             info[1][3]  # elipsis index
         )
     elif info[0] & IndexedComponent_slice.ITEM_MASK:
-        index = _tuple_from_possible_scalar(info[1])
+        if type(info[1]) is not tuple:
+            index = (info[1],)
+        else:
+            index = info[1]
         return (
             info[0],
             tuple( (x.start,x.stop,x.step) if type(x) is slice else x
@@ -351,7 +350,7 @@ class _slice_generator(object):
             # Note: running off the end of the underlying iterator will
             # generate a StopIteration exception that will propagate up
             # and end this iterator.
-            index = advance_iterator(self.component_iter)
+            index = next(self.component_iter)
 
             # We want a tuple of indices, so convert scalars to tuples
             if normalize_index.flatten:
@@ -372,7 +371,7 @@ class _slice_generator(object):
                 continue
 
             valid = True
-            for key, val in iteritems(self.fixed):
+            for key, val in self.fixed.items():
                 # If this index of the component does not match all
                 # the specified fixed indices, don't return anything.
                 if not val == _idx[key]:
@@ -409,7 +408,7 @@ _IndexedComponent_slice = IndexedComponent_slice
 
 # Mock up a callable object with a "check_complete" method
 def _advance_iter(_iter):
-    return advance_iterator(_iter)
+    return next(_iter)
 def _advance_iter_check_complete():
     pass
 _advance_iter.check_complete = _advance_iter_check_complete

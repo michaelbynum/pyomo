@@ -13,9 +13,9 @@ import os
 from os.path import dirname, abspath, join
 thisDir = dirname( abspath(__file__) )
 
-import pyutilib.th as unittest
-from pyutilib.misc import import_file
+import pyomo.common.unittest as unittest
 
+from pyomo.common.fileutils import import_file
 from pyomo.kernel import SolverFactory, variable, maximize, minimize
 from pyomo.solvers.tests.solvers import test_solver_cases
 
@@ -25,8 +25,9 @@ problems = ['convex_var',
             'step_var']
 
 testing_solvers = {}
+testing_solvers['gurobi','nl'] = False
 #testing_solvers['cplex','lp'] = False
-testing_solvers['cplex','nl'] = False
+#testing_solvers['cplex','nl'] = False
 #testing_solvers['ipopt','nl'] = False
 #testing_solvers['cplex','python'] = False
 #testing_solvers['_cplex_persistent','python'] = False
@@ -43,10 +44,8 @@ def createTestMethod(pName,problem,solver,writer,kwds):
             obj.skipTest("Solver %s (interface=%s) is not available"
                          % (solver, writer))
 
-        m = import_file(os.path.join(thisDir,
-                                                   'kernel_problems',
-                                                   problem),
-                                      clear_cache=True)
+        m = import_file(os.path.join(thisDir, 'kernel_problems', problem + '.py'),
+                        clear_cache=True)
 
         model = m.define_model(**kwds)
 

@@ -21,8 +21,6 @@ from pyomo.opt import TerminationCondition
 
 import logging
 
-from six import iteritems
-
 logger = logging.getLogger('pyomo.contrib.fme')
 NAME_BUFFER = {}
 
@@ -30,7 +28,7 @@ def _check_var_bounds_filter(constraint):
     """Check if the constraint is already implied by the variable bounds"""
     # this is one of our constraints, so we know that it is >=.
     min_lhs = 0
-    for v, coef in iteritems(constraint['map']):
+    for v, coef in constraint['map'].items():
         if coef > 0:
             if v.lb is None:
                 return True # we don't have var bounds with which to imply the
@@ -62,7 +60,7 @@ def vars_to_eliminate_list(x):
     else:
         raise ValueError(
             "Expected Var or list of Vars."
-            "\n\tRecieved %s" % type(x))
+            "\n\tReceived %s" % type(x))
 
 def gcd(a,b):
     while b != 0:
@@ -189,7 +187,7 @@ class Fourier_Motzkin_Elimination_Transformation(Transformation):
         super(Fourier_Motzkin_Elimination_Transformation, self).__init__()
 
     def _apply_to(self, instance, **kwds):
-        log_level = logger.getEffectiveLevel()
+        log_level = logger.level
         try:
             assert not NAME_BUFFER
             config = self.CONFIG(kwds.pop('options', {}))
@@ -393,9 +391,12 @@ class Fourier_Motzkin_Elimination_Transformation(Transformation):
                         vars_that_appear_set.add(var)
 
         # we actually begin the recursion here
+        total = len(vars_that_appear)
+        iteration = 1
         while vars_that_appear:
             # first var we will project out
             the_var = vars_that_appear.pop()
+            logger.warning("Projecting out var %s of %s" % (iteration, total))
             if self.verbose:
                 logger.info("Projecting out %s" %
                             the_var.getname(fully_qualified=True,
@@ -465,6 +466,8 @@ class Fourier_Motzkin_Elimination_Transformation(Transformation):
                         logger.info("\t%s <= %s" %
                                     (cons['lower'],
                                      cons['body'].to_expression()))
+
+            iteration += 1
 
         return constraints
 
