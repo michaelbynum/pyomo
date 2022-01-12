@@ -14,94 +14,15 @@ from pyomo.common.dependencies import networkx_available
 from pyomo.common.dependencies import scipy_available
 from pyomo.common.collections import ComponentSet, ComponentMap
 from pyomo.contrib.incidence_analysis.util import (
-        TemporarySubsystemManager,
-        generate_strongly_connected_components,
-        solve_strongly_connected_components,
-        )
+    TemporarySubsystemManager,
+    generate_strongly_connected_components,
+    solve_strongly_connected_components,
+    )
+from pyomo.contrib.incidence_analysis.tests.models_for_testing import (
+    make_gas_expansion_model,
+    make_dynamic_model,
+    )
 import pyomo.common.unittest as unittest
-
-
-def make_gas_expansion_model(N=2):
-    """
-    This is the simplest model I could think of that has a
-    subsystem with a non-trivial block triangularization.
-    Something like a gas (somehow) undergoing a series
-    of isentropic expansions.
-    """
-    m = pyo.ConcreteModel()
-    m.streams = pyo.Set(initialize=range(N+1))
-    m.rho = pyo.Var(m.streams, initialize=1)
-    m.P = pyo.Var(m.streams, initialize=1)
-    m.F = pyo.Var(m.streams, initialize=1)
-    m.T = pyo.Var(m.streams, initialize=1)
-
-    m.R = pyo.Param(initialize=8.31)
-    m.Q = pyo.Param(m.streams, initialize=1)
-    m.gamma = pyo.Param(initialize=1.4*m.R.value)
-
-    def mbal(m, i):
-        if i == 0:
-            return pyo.Constraint.Skip
-        else:
-            return m.rho[i-1]*m.F[i-1] - m.rho[i]*m.F[i] == 0
-    m.mbal = pyo.Constraint(m.streams, rule=mbal)
-
-    def ebal(m, i):
-        if i == 0:
-            return pyo.Constraint.Skip
-        else:
-            return (
-                    m.rho[i-1]*m.F[i-1]*m.T[i-1] +
-                    m.Q[i] -
-                    m.rho[i]*m.F[i]*m.T[i] == 0
-                    )
-    m.ebal = pyo.Constraint(m.streams, rule=ebal)
-
-    def expansion(m, i):
-        if i == 0:
-            return pyo.Constraint.Skip
-        else:
-            return m.P[i]/m.P[i-1] - (m.rho[i]/m.rho[i-1])**m.gamma == 0
-    m.expansion = pyo.Constraint(m.streams, rule=expansion)
-
-    def ideal_gas(m, i):
-        return m.P[i] - m.rho[i]*m.R*m.T[i] == 0
-    m.ideal_gas = pyo.Constraint(m.streams, rule=ideal_gas)
-
-    return m
-
-
-def make_dynamic_model(**disc_args):
-    # Level control model
-    m = pyo.ConcreteModel()
-    m.time = dae.ContinuousSet(initialize=[0.0, 10.0])
-    m.height = pyo.Var(m.time, initialize=1.0)
-    m.flow_in = pyo.Var(m.time, initialize=1.0)
-    m.flow_out = pyo.Var(m.time, initialize=0.5)
-    m.dhdt = dae.DerivativeVar(m.height, wrt=m.time, initialize=0.0)
-
-    m.area = pyo.Param(initialize=1.0)
-    m.flow_const = pyo.Param(initialize=0.5)
-
-    def diff_eqn_rule(m, t):
-        return m.area*m.dhdt[t] - (m.flow_in[t] - m.flow_out[t]) == 0
-    m.diff_eqn = pyo.Constraint(m.time, rule=diff_eqn_rule)
-
-    def flow_out_rule(m, t):
-        return m.flow_out[t] - (m.flow_const*pyo.sqrt(m.height[t])) == 0
-    m.flow_out_eqn = pyo.Constraint(m.time, rule=flow_out_rule)
-
-    default_disc_args = {
-            "wrt": m.time,
-            "nfe": 5,
-            "scheme": "BACKWARD",
-            }
-    default_disc_args.update(disc_args)
-
-    discretizer = pyo.TransformationFactory("dae.finite_difference")
-    discretizer.apply_to(m, **default_disc_args)
-
-    return m
 
 
 @unittest.skipUnless(scipy_available, "SciPy is not available")
@@ -517,6 +438,29 @@ class TestSolveSCC(unittest.TestCase):
             self.assertFalse(m.flow_out[t].fixed)
             self.assertFalse(m.dhdt[t].fixed)
             self.assertTrue(m.flow_in[t].fixed)
+
+    def test_with_calc_var_kwds(self):
+        m = pyo.ConcreteModel()
+        m.v0 = pyo.Var()
+        m.v1 = pyo.Var()
+        m.v2 = pyo.Var(initialize=79703634.05074187)
+        m.v2.fix()
+        m.p0 = pyo.Param(initialize=3e5)
+        m.p1 = pyo.Param(initialize=1.296e12)
+        m.con0 = pyo.Constraint(expr=m.v0 == m.p0)
+        m.con1 = pyo.Constraint(expr=0.0 == m.p1*m.v1/m.v0 + m.v2)
+        calc_var_kwds = {"eps": 1e-7}
+        # This solve fails to converge without raising the tolerance.
+        # The secant method used to converge a linear variable-constraint
+        # pair (such as con0, v0 and con1, v1) leaves us with a residual of
+        # 1.48e-8 due to roundoff error.
+        results = solve_strongly_connected_components(
+            m, calc_var_kwds=calc_var_kwds
+        )
+        self.assertEqual(len(results), 2)
+        self.assertAlmostEqual(m.v0.value, m.p0.value)
+        self.assertAlmostEqual(m.v1.value, -18.4499152895)
+        # -18.4499 ~= -v2*v0/p1
 
 
 if __name__ == "__main__":

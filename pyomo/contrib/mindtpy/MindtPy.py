@@ -35,15 +35,12 @@ from pyomo.contrib.gdpopt.util import (copy_var_list_values, create_utility_bloc
                                        time_code, setup_results_object, process_objective, lower_logger_level_to)
 from pyomo.contrib.mindtpy.initialization import MindtPy_initialize_main
 from pyomo.contrib.mindtpy.iterate import MindtPy_iteration_loop
-from pyomo.contrib.mindtpy.util import MindtPySolveData, model_is_valid
+from pyomo.contrib.mindtpy.util import model_is_valid, set_up_solve_data, set_up_logger
 from pyomo.core import (Block, ConstraintList, NonNegativeReals,
                         Set, Suffix, Var, VarList, TransformationFactory, Objective, RangeSet)
-from pyomo.opt import SolverFactory, SolverResults
-from pyomo.common.collections import Bunch
-from pyomo.contrib.fbbt.fbbt import fbbt
+from pyomo.opt import SolverFactory
 from pyomo.contrib.mindtpy.config_options import _get_MindtPy_config, check_config
-
-logger = logging.getLogger('pyomo.contrib.mindtpy')
+from pyomo.common.config import add_docstring_list
 
 __version__ = (0, 1, 0)
 
@@ -52,7 +49,21 @@ __version__ = (0, 1, 0)
     'mindtpy',
     doc='MindtPy: Mixed-Integer Nonlinear Decomposition Toolbox in Pyomo')
 class MindtPySolver(object):
-    """A decomposition-based MINLP solver.
+    """
+    Decomposition solver for Mixed-Integer Nonlinear Programming (MINLP) problems.
+
+    The MindtPy (Mixed-Integer Nonlinear Decomposition Toolbox in Pyomo) solver applies a variety of decomposition-based approaches to solve Mixed-Integer Nonlinear Programming (MINLP) problems. 
+    These approaches include:
+
+    - Outer approximation (OA)
+    - Global outer approximation (GOA)
+    - Regularized outer approximation (ROA)
+    - LP/NLP based branch-and-bound (LP/NLP)
+    - Global LP/NLP based branch-and-bound (GLP/NLP)
+    - Regularized LP/NLP based branch-and-bound (RLP/NLP)
+    - Feasibility pump (FP)
+
+    This solver implementation has been developed by David Bernal (@bernalde) and Zedong Peng (@ZedongPeng) as part of research efforts at the Grossmann Research Group (http://egon.cheme.cmu.edu/) at the Department of Chemical Engineering at Carnegie Mellon University.
     """
     CONFIG = _get_MindtPy_config()
 
@@ -71,37 +82,23 @@ class MindtPySolver(object):
     def solve(self, model, **kwds):
         """Solve the model.
 
-        Warning: this solver is still in beta. Keyword arguments subject to
-        change. Undocumented keyword arguments definitely subject to change.
+        Parameters
+        ----------
+        model : Pyomo model
+            The MINLP model to be solved.
 
-        Args:
-            model (Block): a Pyomo model or block to be solved
+        Returns
+        -------
+        results : SolverResults
+            Results from solving the MINLP problem by MindtPy.
         """
-        config = self.CONFIG(kwds.pop('options', {}))
+        config = self.CONFIG(kwds.pop('options', {}), preserve_implicit=True)  # TODO: do we need to set preserve_implicit=True?
         config.set_value(kwds)
-
-        solve_data = MindtPySolveData()
-        solve_data.results = SolverResults()
-        solve_data.timing = Bunch()
-        solve_data.curr_int_sol = []
-        solve_data.should_terminate = False
-        solve_data.integer_list = []
-
+        set_up_logger(config)
         check_config(config)
 
-        # if the objective function is a constant, dual bound constraint is not added.
-        obj = next(model.component_data_objects(ctype=Objective, active=True))
-        if obj.expr.polynomial_degree() == 0:
-            config.use_dual_bound = False
+        solve_data = set_up_solve_data(model, config)
 
-        if config.use_fbbt:
-            fbbt(model)
-            # TODO: logging_level is not logging.INFO here
-            config.logger.info(
-                'Use the fbbt to tighten the bounds of variables')
-
-        solve_data.original_model = model
-        solve_data.working_model = model.clone()
         if config.integer_to_binary:
             TransformationFactory('contrib.integer_to_binary'). \
                 apply_to(solve_data.working_model)
@@ -110,7 +107,11 @@ class MindtPySolver(object):
         with time_code(solve_data.timing, 'total', is_main_timer=True), \
                 lower_logger_level_to(config.logger, new_logging_level), \
                 create_utility_block(solve_data.working_model, 'MindtPy_utils', solve_data):
-            config.logger.info('---Starting MindtPy---')
+            config.logger.info(
+                '---------------------------------------------------------------------------------------------\n'
+                '              Mixed-Integer Nonlinear Decomposition Toolbox in Pyomo (MindtPy)               \n'
+                '---------------------------------------------------------------------------------------------\n'
+                'For more information, please visit https://pyomo.readthedocs.io/en/stable/contributed_packages/mindtpy.html')
 
             MindtPy = solve_data.working_model.MindtPy_utils
             setup_results_object(solve_data, config)
@@ -169,30 +170,6 @@ class MindtPySolver(object):
                 doc='explored no-good cuts')
             lin.feasible_no_good_cuts.deactivate()
 
-            # Set up iteration counters
-            solve_data.nlp_iter = 0
-            solve_data.mip_iter = 0
-            solve_data.mip_subiter = 0
-            solve_data.nlp_infeasible_counter = 0
-            if config.init_strategy == 'FP':
-                solve_data.fp_iter = 1
-
-            # set up bounds
-            solve_data.LB = float('-inf')
-            solve_data.UB = float('inf')
-            solve_data.LB_progress = [solve_data.LB]
-            solve_data.UB_progress = [solve_data.UB]
-            if config.single_tree and (config.add_no_good_cuts or config.use_tabu_list):
-                solve_data.stored_bound = {}
-            if config.strategy == 'GOA' and (config.add_no_good_cuts or config.use_tabu_list):
-                solve_data.num_no_good_cuts_added = {}
-
-            # Set of NLP iterations for which cuts were generated
-            lin.nlp_iters = Set(dimen=1)
-
-            # Set of MIP iterations for which cuts were generated in ECP
-            lin.mip_iters = Set(dimen=1)
-
             if config.feasibility_norm == 'L1' or config.feasibility_norm == 'L2':
                 feas.nl_constraint_set = RangeSet(len(MindtPy.nonlinear_constraint_list),
                                                   doc='Integer index set over the nonlinear constraints.')
@@ -206,19 +183,6 @@ class MindtPySolver(object):
             if config.add_slack:
                 lin.slack_vars = VarList(
                     bounds=(0, config.max_slack), initialize=0, domain=NonNegativeReals)
-
-            # Flag indicating whether the solution improved in the past
-            # iteration or not
-            solve_data.solution_improved = False
-            solve_data.bound_improved = False
-
-            if config.nlp_solver == 'ipopt':
-                if not hasattr(solve_data.working_model, 'ipopt_zL_out'):
-                    solve_data.working_model.ipopt_zL_out = Suffix(
-                        direction=Suffix.IMPORT)
-                if not hasattr(solve_data.working_model, 'ipopt_zU_out'):
-                    solve_data.working_model.ipopt_zU_out = Suffix(
-                        direction=Suffix.IMPORT)
 
             # Initialize the main problem
             with time_code(solve_data.timing, 'initialization'):
@@ -264,3 +228,8 @@ class MindtPySolver(object):
 
     def __exit__(self, t, v, traceback):
         pass
+
+
+# Add the CONFIG arguments to the solve method docstring
+MindtPySolver.solve.__doc__ = add_docstring_list(
+    MindtPySolver.solve.__doc__, MindtPySolver.CONFIG, indent_by=8)

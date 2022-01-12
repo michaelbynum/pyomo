@@ -2318,7 +2318,7 @@ class Test(unittest.TestCase):
 
 
     def test_quadratic2(self):
-        m = AbstractModel()
+        m = ConcreteModel()
         m.a = Var()
         m.b = Var()
         m.c = Var()
@@ -2661,16 +2661,15 @@ class Test(unittest.TestCase):
         #
         self.assertTrue(len(rep.linear_vars) == 0)
         self.assertTrue(len(rep.linear_coefs) == 0)
-        self.assertTrue(len(rep.quadratic_vars) == 1)
-        self.assertTrue(len(rep.quadratic_coefs) == 1)
+        self.assertTrue(len(rep.quadratic_vars) == 0)
+        self.assertTrue(len(rep.quadratic_coefs) == 0)
         self.assertFalse(rep.nonlinear_expr is None)
         self.assertEqual(len(rep.nonlinear_vars), 3)
-        baseline = { bc_key:5 }
+        baseline = {}
         self.assertEqual(baseline, repn_to_dict(rep))
         s = pickle.dumps(rep)
         rep = pickle.loads(s)
-        bc_key_ = (id(rep.quadratic_vars[0][0]),id(rep.quadratic_vars[0][1])) if id(rep.quadratic_vars[0][0]) <= id(rep.quadratic_vars[0][1]) else (id(rep.quadratic_vars[0][1]),id(rep.quadratic_vars[0][0]))
-        baseline = { bc_key_:5 }
+        baseline = {}
         self.assertEqual(baseline, repn_to_dict(rep))
 
         # Do not collect quadratics
@@ -3512,7 +3511,7 @@ class Test(unittest.TestCase):
         #       ExprIf
         #      /  |   \
         #   True  a    b
-        m = AbstractModel()
+        m = ConcreteModel()
         m.a = Var()
         m.b = Var()
         m.c = Var()
@@ -3928,19 +3927,19 @@ class Test(unittest.TestCase):
 
         e = (1 + m.v + m.w + m.v**2)*(m.v + m.w + m.v**2)
         rep = generate_standard_repn(e, compute_values=True)
-        self.assertEqual(str(rep.to_expression()), "v + w + 2*v**2 + 2*(v*w) + w**2 + (v + w)*(v*v) + v*v*(v + w)")
+        self.assertEqual(str(rep.to_expression()), "(1 + v + w + v**2)*(v + w + v**2)")
         rep = generate_standard_repn(e, compute_values=True, quadratic=False)
         self.assertEqual(str(rep.to_expression()), "(1 + v + w + v**2)*(v + w + v**2)")
 
         e = (m.v + m.w + m.v**2)*(1 + m.v + m.w + m.v**2)
         rep = generate_standard_repn(e, compute_values=True)
-        self.assertEqual(str(rep.to_expression()), "v + w + 2*v**2 + 2*(v*w) + w**2 + (v + w)*(v*v) + v*v*(v + w)")
+        self.assertEqual(str(rep.to_expression()), "(v + w + v**2)*(1 + v + w + v**2)")
         rep = generate_standard_repn(e, compute_values=True, quadratic=False)
         self.assertEqual(str(rep.to_expression()), "(v + w + v**2)*(1 + v + w + v**2)")
 
         e = (1 + m.v + m.w + m.v**2)*(1 + m.v + m.w + m.v**2)
         rep = generate_standard_repn(e, compute_values=True)
-        self.assertEqual(str(rep.to_expression()), "1 + 2*v + 2*w + 3*v**2 + 2*(v*w) + w**2 + (v + w)*(v*v) + v*v*(v + w)")
+        self.assertEqual(str(rep.to_expression()), "(1 + v + w + v**2)*(1 + v + w + v**2)")
         rep = generate_standard_repn(e, compute_values=True, quadratic=False)
         self.assertEqual(str(rep.to_expression()), "(1 + v + w + v**2)*(1 + v + w + v**2)")
 
@@ -3954,6 +3953,17 @@ class Test(unittest.TestCase):
         self.assertEqual(str(rep.to_expression()), "1 + 2*v + v**2")
         rep = generate_standard_repn(e, compute_values=True, quadratic=False)
         self.assertEqual(str(rep.to_expression()), "(1 + v)*(1 + v)")
+
+    def test_product6(self):
+        m = ConcreteModel()
+        m.x = Var()
+        m.y = Var()
+
+        e = (m.x + m.y) * (m.x - m.y) * (m.x ** 2 + m.y ** 2)
+        rep = generate_standard_repn(e)
+        self.assertEqual(str(rep.to_expression()), "(x + y)*(x - y)*(x**2 + y**2)")
+        self.assertTrue(rep.is_nonlinear())
+        self.assertFalse(rep.is_quadratic())
 
     def test_vars(self): 
         m = ConcreteModel()
@@ -4005,17 +4015,19 @@ class Test(unittest.TestCase):
         rep = generate_standard_repn(e, compute_values=True)
         self.assertEqual(str(rep.to_expression()), "w")
 
-        e = Expr_if(not m.p, 1, 0)
+        e = Expr_if(m.p == 0, 1, 0)
         rep = generate_standard_repn(e, compute_values=True)
         self.assertEqual(str(rep.to_expression()), "0")
         rep = generate_standard_repn(e, compute_values=False)
-        self.assertEqual(str(rep.to_expression()), "Expr_if( ( 0.0 ), then=( 1 ), else=( 0 ) )")
+        self.assertEqual(str(rep.to_expression()),
+                         "Expr_if( ( p  ==  0 ), then=( 1 ), else=( 0 ) )")
 
-        e = Expr_if(not m.p, 1, m.v)
+        e = Expr_if(m.p == 0, 1, m.v)
         rep = generate_standard_repn(e, compute_values=True)
         self.assertEqual(str(rep.to_expression()), "0")
         rep = generate_standard_repn(e, compute_values=False)
-        self.assertEqual(str(rep.to_expression()), "Expr_if( ( 0.0 ), then=( 1 ), else=( v ) )")
+        self.assertEqual(str(rep.to_expression()),
+                         "Expr_if( ( p  ==  0 ), then=( 1 ), else=( v ) )")
 
         e = Expr_if(m.v, 1, 0)
         rep = generate_standard_repn(e, compute_values=True)
@@ -4131,7 +4143,7 @@ class Test(unittest.TestCase):
 
         e = m.v + m.w >= 2
         rep = generate_standard_repn(e, compute_values=True)
-        self.assertEqual(str(rep.to_expression()), "2.0  <=  v + w")
+        self.assertEqual(str(rep.to_expression()), "2  <=  v + w")
 
     def test_external_fn(self):
         def _g(*args):
