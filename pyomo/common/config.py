@@ -29,6 +29,7 @@ import sys
 from textwrap import wrap
 import types
 
+from pyomo.common.collections import Sequence, Mapping
 from pyomo.common.deprecation import deprecated, relocated_module_attribute
 from pyomo.common.fileutils import import_file
 from pyomo.common.modeling import NoArgumentGiven
@@ -821,8 +822,7 @@ to the ArgumentParser object:
     >>> print(parser.format_help())
     usage: tester [-h] [--iterlim INT] [--lbfgs] [--disable-linesearch]
                   [--reltol FLOAT] [--abstol FLOAT]
-    <BLANKLINE>
-    optional arguments:
+    ...
       -h, --help            show this help message and exit
       --iterlim INT         iteration limit
       --lbfgs               use limited memory BFGS update
@@ -1150,7 +1150,7 @@ class ConfigBase(object):
         #    state[i] = getattr(self,i)
         # return state
         #
-        # Hoewever, in this case, the (nominal) parent class is
+        # However, in this case, the (nominal) parent class is
         # 'object', and object does not implement __getstate__.  Since
         # super() doesn't actually return a class, we are going to check
         # the *derived class*'s MRO and see if this is the second to
@@ -1158,10 +1158,11 @@ class ConfigBase(object):
         # can allocate the state dictionary.  If it is not, then we call
         # the super-class's __getstate__ (since that class is NOT
         # 'object').
-        if self.__class__.__mro__[-2] is ConfigBase:
-            state = {}
+        _base = super()
+        if hasattr(_base, '__getstate__'):
+            state = _base.__getstate__()
         else:
-            state = super(ConfigBase, self).__getstate__()
+            state = {}
         state.update((key, getattr(self, key)) for key in ConfigBase.__slots__)
         state['_domain'] = _picklable(state['_domain'], self)
         state['_parent'] = None
@@ -1721,7 +1722,7 @@ class MarkImmutable(object):
         self.release_lock()
 
 
-class ConfigList(ConfigBase):
+class ConfigList(ConfigBase, Sequence):
     """Store and manipulate a list of configuration values.
 
     Parameters
@@ -1896,7 +1897,7 @@ class ConfigList(ConfigBase):
                 yield v
 
 
-class ConfigDict(ConfigBase):
+class ConfigDict(ConfigBase, Mapping):
     """Store and manipulate a dictionary of configuration values.
 
     Parameters
