@@ -335,7 +335,7 @@ class Results(object):
         s = ''
         s += 'termination_condition: '   + str(self.termination_condition)   + '\n'
         s += 'best_feasible_objective: ' + str(self.best_feasible_objective) + '\n'
-        s += 'best_objective_bound: '    + str(self.best_objective_bound)
+        s += 'best_objective_bound: '    + str(self.best_objective_bound) + '\n'
         return s
 
 
@@ -457,8 +457,8 @@ class Solver(abc.ABC):
         NotFound = 0
         BadVersion = -1
         BadLicense = -2
-        FullLicense = 1
-        LimitedLicense = 2
+        Available = 1
+        SizeLimited = 2
         NeedsCompiledExtension = -3
 
         def __bool__(self):
@@ -531,11 +531,6 @@ class Solver(abc.ABC):
             An object for configuring pyomo solve options such as the time limit.
             These options are mostly independent of the solver.
         """
-        pass
-
-    @property
-    @abc.abstractmethod
-    def symbol_map(self):
         pass
 
     def is_persistent(self):

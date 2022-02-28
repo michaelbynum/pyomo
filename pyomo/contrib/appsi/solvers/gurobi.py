@@ -265,9 +265,9 @@ class Gurobi(PersistentBase, PersistentSolver):
                 m.addVars(range(2001))
                 m.setParam('OutputFlag', 0)
                 m.optimize()
-                cls._available = Gurobi.Availability.FullLicense
+                cls._available = Gurobi.Availability.Available
             except gurobipy.GurobiError:
-                cls._available = Gurobi.Availability.LimitedLicense
+                cls._available = Gurobi.Availability.SizeLimited
             finally:
                 m.dispose()
 

@@ -130,7 +130,7 @@ class Ipopt(PersistentSolver):
             return self.Availability.NotFound
         elif not cmodel_available:
             return self.Availability.NeedsCompiledExtension
-        return self.Availability.FullLicense
+        return self.Availability.Available
 
     def version(self):
         results = subprocess.run([str(self.config.executable), '--version'],

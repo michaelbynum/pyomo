@@ -96,13 +96,13 @@ class Cplex(PersistentSolver):
                     m = self._cplex.Cplex()
                     m.variables.add(lb=[0]*1001)
                     m.solve()
-                    Cplex._available = self.Availability.FullLicense
+                    Cplex._available = self.Availability.Available
                 except self._cplex.exceptions.errors.CplexSolverError:
                     try:
                         m = self._cplex.Cplex()
                         m.variables.add(lb=[0])
                         m.solve()
-                        Cplex._available = self.Availability.LimitedLicense
+                        Cplex._available = self.Availability.SizeLimited
                     except:
                         Cplex._available = self.Availability.BadLicense
         else:
