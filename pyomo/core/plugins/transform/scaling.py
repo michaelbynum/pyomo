@@ -99,7 +99,7 @@ class ScaleModel(Transformation):
                 % (scaling_factor, component_data))
         return scaling_factor
 
-    def _apply_to(self, model, rename=True):
+    def _apply_to(self, model, rename=True, descend_into=True):
         # create a map of component to scaling factor
         component_scaling_factor_map = ComponentMap()
 
@@ -111,7 +111,7 @@ class ScaleModel(Transformation):
                                  ", but cannot find the suffix 'scaling_factor' on the model")
 
             # get the scaling factors
-            for c in model.component_data_objects(ctype=(Var, Constraint, Objective), descend_into=True):
+            for c in model.component_data_objects(ctype=(Var, Constraint, Objective), descend_into=descend_into):
                 component_scaling_factor_map[c] = self._get_float_scaling_factor(model, c)
         else:
             raise ValueError("ScaleModel transformation: unknown scaling_method found"
@@ -121,7 +121,7 @@ class ScaleModel(Transformation):
             # rename all the Vars, Constraints, and Objectives
             # from foo to scaled_foo
             component_list = list(model.component_objects(
-                ctype=[Var, Constraint, Objective]))
+                ctype=[Var, Constraint, Objective], descend_into=descend_into))
             scaled_component_to_original_name_map = rename_components(
                     model=model,
                     component_list=component_list,
@@ -131,14 +131,15 @@ class ScaleModel(Transformation):
             scaled_component_to_original_name_map = ComponentMap(
                     [(comp, comp.name) for comp in 
                         model.component_objects(
-                            ctype=[Var,Constraint, Objective])]
+                            ctype=[Var,Constraint, Objective],
+                            descend_into=descend_into)]
                     )
 
         # scale the variable bounds and values and build the variable substitution map
         # for scaling vars in constraints
         variable_substitution_map = ComponentMap()
         already_scaled = set()
-        for variable in [var for var in model.component_objects(ctype=Var, descend_into=True)]:
+        for variable in [var for var in model.component_objects(ctype=Var, descend_into=descend_into)]:
             # set the bounds/value for the scaled variable
             for k in variable:
                 v = variable[k]
@@ -175,7 +176,7 @@ class ScaleModel(Transformation):
                                       for k in variable_substitution_map}
 
         already_scaled = set()
-        for component in model.component_objects(ctype=(Constraint, Objective), descend_into=True):
+        for component in model.component_objects(ctype=(Constraint, Objective), descend_into=descend_into):
             for k in component:
                 c = component[k]
                 if id(c) in already_scaled:
@@ -226,7 +227,7 @@ class ScaleModel(Transformation):
 
         return model
 
-    def propagate_solution(self, scaled_model, original_model):
+    def propagate_solution(self, scaled_model, original_model, descend_into=True):
         """
         This method takes the solution in scaled_model and maps it back to the original model.
 
@@ -255,7 +256,7 @@ class ScaleModel(Transformation):
         scaled_component_to_original_name_map = scaled_model.scaled_component_to_original_name_map
 
         # get the objective scaling factor
-        scaled_objectives = list(scaled_model.component_data_objects(ctype=Objective, active=True, descend_into=True))
+        scaled_objectives = list(scaled_model.component_data_objects(ctype=Objective, active=True, descend_into=descend_into))
         if len(scaled_objectives) != 1:
             raise NotImplementedError(
                 'ScaleModel.propagate_solution requires a single active objective function, but %d objectives found.' % (
@@ -264,7 +265,7 @@ class ScaleModel(Transformation):
 
         # transfer the variable values and reduced costs
         check_reduced_costs = type(scaled_model.component('rc')) is Suffix
-        for scaled_v in scaled_model.component_objects(ctype=Var, descend_into=True):
+        for scaled_v in scaled_model.component_objects(ctype=Var, descend_into=descend_into):
             # get the unscaled_v from the original model
             original_v_path = scaled_component_to_original_name_map[scaled_v]
             # This will not work if decimal indices are present:
@@ -281,7 +282,7 @@ class ScaleModel(Transformation):
 
         # transfer the duals
         if type(scaled_model.component('dual')) is Suffix and type(original_model.component('dual')) is Suffix:
-            for scaled_c in scaled_model.component_objects(ctype=Constraint, descend_into=True):
+            for scaled_c in scaled_model.component_objects(ctype=Constraint, descend_into=descend_into):
                 original_c = original_model.find_component(scaled_component_to_original_name_map[scaled_c])
 
                 for k in scaled_c:
