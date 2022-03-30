@@ -41,10 +41,10 @@ def _print_var_set(var_set):
     return s
 
 
-def _check_var_bounds(m: _BlockData, too_large: float):
+def _check_var_bounds(m: _BlockData, too_large: float, descend_into):
     vars_without_bounds = ComponentSet()
     vars_with_large_bounds = ComponentSet()
-    for v in m.component_data_objects(pyo.Var, descend_into=True):
+    for v in m.component_data_objects(pyo.Var, descend_into=descend_into):
         if v.is_fixed():
             continue
         if v.lb is None or v.ub is None:
@@ -86,7 +86,7 @@ def _check_coefficents(comp, expr, too_large, too_small, largs_coef_map, small_c
                     small_coef_map[comp].append((_v, der_lb, der_ub))
 
 
-def report_scaling(m: _BlockData, too_large: float = 5e4, too_small: float = 1e-6) -> bool:
+def report_scaling(m: _BlockData, too_large: float = 5e4, too_small: float = 1e-6, descend_into=True) -> bool:
     """
     This function logs potentially poorly scaled parts of the model.
     It requires that all variables be bounded.
@@ -114,7 +114,7 @@ def report_scaling(m: _BlockData, too_large: float = 5e4, too_small: float = 1e-
     success: bool
         Returns False if any potentially poorly scaled components were found
     """
-    vars_without_bounds, vars_with_large_bounds = _check_var_bounds(m, too_large)
+    vars_without_bounds, vars_with_large_bounds = _check_var_bounds(m, too_large, descend_into)
 
     cons_with_large_bounds = dict()
     cons_with_large_coefficients = dict()
@@ -123,16 +123,16 @@ def report_scaling(m: _BlockData, too_large: float = 5e4, too_small: float = 1e-
     objs_with_large_coefficients = pyo.ComponentMap()
     objs_with_small_coefficients = pyo.ComponentMap()
 
-    for c in m.component_data_objects(pyo.Constraint, active=True, descend_into=True):
+    for c in m.component_data_objects(pyo.Constraint, active=True, descend_into=descend_into):
         _check_coefficents(c, c.body, too_large, too_small, cons_with_large_coefficients, cons_with_small_coefficients)
 
-    for c in m.component_data_objects(pyo.Constraint, active=True, descend_into=True):
+    for c in m.component_data_objects(pyo.Constraint, active=True, descend_into=descend_into):
         c_lb, c_ub = compute_bounds_on_expr(c.body)
         c_lb, c_ub = _bounds_to_float(c_lb, c_ub)
         if c_lb <= -too_large or c_ub >= too_large:
             cons_with_large_bounds[c] = (c_lb, c_ub)
 
-    for c in m.component_data_objects(pyo.Objective, active=True, descend_into=True):
+    for c in m.component_data_objects(pyo.Objective, active=True, descend_into=descend_into):
         _check_coefficents(c, c.expr, too_large, too_small, objs_with_large_coefficients, objs_with_small_coefficients)
 
     s = '\n\n'
