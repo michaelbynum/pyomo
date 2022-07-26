@@ -1,3 +1,6 @@
+import operator
+
+from pyomo.core.expr import numeric_expr
 import poek as pk
 from pyomo.core.base.component import ComponentData, ModelComponentFactory
 from pyomo.common.modeling import NOTSET
@@ -15,6 +18,7 @@ from pyomo.common.log import is_debug_set
 import sys
 from pyomo.core.base.set import Binary, Reals, Integers
 from pyomo.common.collections import ComponentMap
+from pyomo.core.expr.numvalue import nonpyomo_leaf_types
 
 
 logger = logging.getLogger(__name__)
@@ -201,43 +205,52 @@ class _GeneralVarData(ComponentData):
         self.unfix()
 
     def __add__(self, other):
-        return self._pv + _other_operand_map[type(other)](other)
+        if type(other) is SumExpression:
+            return other + self
+        else:
+            return SumExpression([self, other])
 
     def __radd__(self, other):
-        return _other_operand_map[type(other)](other) + self._pv
+        return _operand_map[type(other)](other) + self._pv
 
     def __sub__(self, other):
-        return self._pv - _other_operand_map[type(other)](other)
+        return self._pv - _operand_map[type(other)](other)
 
     def __rsub__(self, other):
-        return _other_operand_map[type(other)](other) - self._pv
+        return _operand_map[type(other)](other) - self._pv
 
     def __mul__(self, other):
-        return self._pv * _other_operand_map[type(other)](other)
+        if type(other) in nonpyomo_leaf_types:
+            return MonomialTermExpression((other, self))
+        else:
+            return ProductExpression((self, other))
 
     def __rmul__(self, other):
-        return _other_operand_map[type(other)](other) * self._pv
+        if type(other) in nonpyomo_leaf_types:
+            return MonomialTermExpression((other, self))
+        else:
+            return ProductExpression((self, other))
 
     def __neg__(self):
         return -self._pv
 
     def __truediv__(self, other):
-        return self._pv / _other_operand_map[type(other)](other)
+        return self._pv / _operand_map[type(other)](other)
 
     def __rtruediv__(self, other):
-        return _other_operand_map[type(other)](other) / self._pv
+        return _operand_map[type(other)](other) / self._pv
 
     def __div__(self, other):
-        return self._pv / _other_operand_map[type(other)](other)
+        return self._pv / _operand_map[type(other)](other)
 
     def __rdiv__(self, other):
-        return _other_operand_map[type(other)](other) / self._pv
+        return _operand_map[type(other)](other) / self._pv
 
     def __pow__(self, other):
-        return self._pv ** _other_operand_map[type(other)](other)
+        return self._pv ** _operand_map[type(other)](other)
 
     def __rpow__(self, other):
-        return _other_operand_map[type(other)](other) ** self._pv
+        return _operand_map[type(other)](other) ** self._pv
 
     def __pos__(self):
         return self
@@ -567,21 +580,129 @@ class IndexedVar(Var):
             vardata.domain = domain
 
 
-def _get_other_operand_float(operand):
-    return operand
+class ExpressionBase(object):
+    __slots__ = tuple()
+
+    def __call__(self, exception=False):
+        return self._poek_expr.value
+
+    def variables(self):
+        return list(self._variables.values())[:self._n_vars]
+
+    def __mul__(self, other):
+        return ProductExpression((self, other))
+
+    def __rmul__(self, other):
+        return ProductExpression((other, self))
+
+    def __add__(self, other):
+        if type(other) is SumExpression:
+            return other + self
+        else:
+            return SumExpression([self, other])
+
+    def __radd__(self, other):
+        return SumExpression([other, self])
 
 
-def _get_other_operand_poek_expr(operand):
-    return operand
+class BinaryExpression(ExpressionBase):
+    __slots__ = tuple()
+    func = None
+
+    def __init__(self, args):
+        self._args_ = args
+        self._shared_vars = False
+        self._variables = dict()
+        arg0, self._variables = _operand_map[type(args[0])](args[0], self._variables)
+        arg1, self._variables = _operand_map[type(args[1])](args[1], self._variables)
+        self._poek_expr = self.func(arg0, arg1)
+        self._n_vars = len(self._variables)
 
 
-def _get_other_operand_var(operand):
-    return operand._pv
+class ProductExpression(BinaryExpression, numeric_expr.ProductExpression):
+    __slots__ = ('_poek_expr', '_variables', '_shared_vars', '_n_vars')
+    func = operator.mul
 
 
-_other_operand_map = dict()
-_other_operand_map[float] = _get_other_operand_float
-_other_operand_map[int] = _get_other_operand_float
-_other_operand_map[_GeneralVarData] = _get_other_operand_var
-_other_operand_map[ScalarVar] = _get_other_operand_var
-_other_operand_map[pk.expression] = _get_other_operand_poek_expr
+class MonomialTermExpression(ProductExpression, numeric_expr.MonomialTermExpression):
+    __slots__ = tuple()
+    func = operator.mul
+
+
+class SumExpression(ExpressionBase, numeric_expr.SumExpression):
+    __slots__ = ('_poek_expr', '_variables', '_shared_vars', '_n_vars')
+
+    def __init__(self, args):
+        self._args_ = args
+        self._shared_vars = False
+        self._nargs = len(self._args_)
+        self._shared_args = False
+        self._variables = dict()
+        self._poek_expr = 0
+        for arg in args:
+            poek_arg, self._variables = _operand_map[type(arg)](arg, self._variables)
+            self._poek_expr += poek_arg
+        self._n_vars = len(self._variables)
+
+    def __add__(self, other):
+        res = SumExpression([self, other])
+        if self._shared_args:
+            new_args = self.args
+        else:
+            new_args = self._args_
+            self._shared_args = True
+        new_args.append(other)
+        res._args_ = new_args
+        res._nargs = len(new_args)
+        return res
+
+
+# class SumExpression(numeric_expr.SumExpression):
+#
+#     __slots__ = ('_poek_expr', '_variables', '_shared_vars')
+#
+#     def __init__(self, args, poek_arg0, poek_arg1):
+#         super().__init__(args)
+#         self._shared_vars = False
+#         self._variables = dict()
+#         arg0, self._variables = _operand_map[type(poek_arg0)](poek_arg0, self._variables)
+#         arg1, self._variables = _operand_map[type(poek_arg1)](poek_arg1, self._variables)
+#         self._poek_expr = arg0 + arg1
+#
+#     def __call__(self, exception=False):
+#         return self._poek_expr.value
+
+
+def _get_operand_float(operand, var_dict):
+    return operand, var_dict
+
+
+def _get_operand_var(operand, var_dict):
+    var_dict[id(operand)] = operand
+    return operand._pv, var_dict
+
+
+def _get_operand_expr(operand, var_dict):
+    op_var_dict = operand._variables
+    if len(op_var_dict) > len(var_dict) and not operand._shared_vars:
+        new_var_dict = op_var_dict
+        new_var_dict.update(var_dict)
+        operand._shared_vars = True
+    else:
+        new_var_dict = var_dict
+        if operand._shared_vars:
+            new_var_dict.update({id(v): v for v in operand.variables()})
+        else:
+            new_var_dict.update(op_var_dict)
+    return operand._poek_expr, new_var_dict
+
+
+_operand_map = dict()
+_operand_map[float] = _get_operand_float
+_operand_map[int] = _get_operand_float
+_operand_map[_GeneralVarData] = _get_operand_var
+_operand_map[ScalarVar] = _get_operand_var
+_operand_map[ProductExpression] = _get_operand_expr
+_operand_map[MonomialTermExpression] = _get_operand_expr
+_operand_map[ProductExpression] = _get_operand_expr
+_operand_map[SumExpression] = _get_operand_expr
