@@ -586,9 +586,6 @@ class ExpressionBase(object):
     def __call__(self, exception=False):
         return self._poek_expr.value
 
-    def variables(self):
-        return list(self._variables.values())[:self._n_vars]
-
     def __mul__(self, other):
         return ProductExpression((self, other))
 
@@ -611,16 +608,13 @@ class BinaryExpression(ExpressionBase):
 
     def __init__(self, args):
         self._args_ = args
-        self._shared_vars = False
-        self._variables = dict()
-        arg0, self._variables = _operand_map[type(args[0])](args[0], self._variables)
-        arg1, self._variables = _operand_map[type(args[1])](args[1], self._variables)
+        arg0 = _operand_map[type(args[0])](args[0])
+        arg1 = _operand_map[type(args[1])](args[1])
         self._poek_expr = self.func(arg0, arg1)
-        self._n_vars = len(self._variables)
 
 
 class ProductExpression(BinaryExpression, numeric_expr.ProductExpression):
-    __slots__ = ('_poek_expr', '_variables', '_shared_vars', '_n_vars')
+    __slots__ = ('_poek_expr',)
     func = operator.mul
 
 
@@ -630,19 +624,15 @@ class MonomialTermExpression(ProductExpression, numeric_expr.MonomialTermExpress
 
 
 class SumExpression(ExpressionBase, numeric_expr.SumExpression):
-    __slots__ = ('_poek_expr', '_variables', '_shared_vars', '_n_vars')
+    __slots__ = ('_poek_expr',)
 
     def __init__(self, args):
         self._args_ = args
-        self._shared_vars = False
         self._nargs = len(self._args_)
         self._shared_args = False
-        self._variables = dict()
         self._poek_expr = 0
-        for arg in args:
-            poek_arg, self._variables = _operand_map[type(arg)](arg, self._variables)
-            self._poek_expr += poek_arg
-        self._n_vars = len(self._variables)
+        poek_args = [_operand_map[type(arg)](arg) for arg in args]
+        self._poek_expr = pk.sum(poek_args)
 
     def __add__(self, other):
         res = SumExpression([self, other])
@@ -657,44 +647,20 @@ class SumExpression(ExpressionBase, numeric_expr.SumExpression):
         return res
 
 
-# class SumExpression(numeric_expr.SumExpression):
-#
-#     __slots__ = ('_poek_expr', '_variables', '_shared_vars')
-#
-#     def __init__(self, args, poek_arg0, poek_arg1):
-#         super().__init__(args)
-#         self._shared_vars = False
-#         self._variables = dict()
-#         arg0, self._variables = _operand_map[type(poek_arg0)](poek_arg0, self._variables)
-#         arg1, self._variables = _operand_map[type(poek_arg1)](poek_arg1, self._variables)
-#         self._poek_expr = arg0 + arg1
-#
-#     def __call__(self, exception=False):
-#         return self._poek_expr.value
+def sum(args):
+    return SumExpression(list(args))
 
 
-def _get_operand_float(operand, var_dict):
-    return operand, var_dict
+def _get_operand_float(operand):
+    return operand
 
 
-def _get_operand_var(operand, var_dict):
-    var_dict[id(operand)] = operand
-    return operand._pv, var_dict
+def _get_operand_var(operand):
+    return operand._pv
 
 
-def _get_operand_expr(operand, var_dict):
-    op_var_dict = operand._variables
-    if len(op_var_dict) > len(var_dict) and not operand._shared_vars:
-        new_var_dict = op_var_dict
-        new_var_dict.update(var_dict)
-        operand._shared_vars = True
-    else:
-        new_var_dict = var_dict
-        if operand._shared_vars:
-            new_var_dict.update({id(v): v for v in operand.variables()})
-        else:
-            new_var_dict.update(op_var_dict)
-    return operand._poek_expr, new_var_dict
+def _get_operand_expr(operand):
+    return operand._poek_expr
 
 
 _operand_map = dict()
