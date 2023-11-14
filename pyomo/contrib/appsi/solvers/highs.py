@@ -198,6 +198,10 @@ class Highs(PersistentBase, PersistentSolver):
         self._solver_options = val
 
     @property
+    def options(self):
+        return self._solver_options
+
+    @property
     def symbol_map(self):
         return SymbolMap()
         # raise RuntimeError('Highs interface does not have a symbol map')

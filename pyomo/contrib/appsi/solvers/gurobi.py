@@ -344,6 +344,10 @@ class Gurobi(PersistentBase, PersistentSolver):
         self._solver_options = val
 
     @property
+    def options(self):
+        return self._solver_options
+
+    @property
     def symbol_map(self):
         return self._symbol_map
 

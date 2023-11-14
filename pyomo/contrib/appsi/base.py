@@ -680,6 +680,11 @@ class Solver(abc.ABC):
 
     @property
     @abc.abstractmethod
+    def options(self):
+        pass
+
+    @property
+    @abc.abstractmethod
     def symbol_map(self):
         pass
 
