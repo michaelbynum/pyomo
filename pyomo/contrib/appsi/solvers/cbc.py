@@ -139,6 +139,10 @@ class Cbc(PersistentSolver):
         self._solver_options = val
 
     @property
+    def options(self):
+        return self._solver_options
+
+    @property
     def update_config(self):
         return self._writer.update_config
 

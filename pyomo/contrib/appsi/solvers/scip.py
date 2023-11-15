@@ -7,14 +7,14 @@ from pyomo.contrib.appsi.base import (
 )
 from pyomo.core.base.constraint import Constraint
 from pyomo.core.base.block import _BlockData
-from pyomo.core.base.var import _GeneralVarData, ScalarVar
+from pyomo.core.base.var import _GeneralVarData, ScalarVar, Var
 from pyomo.core.base.param import _ParamData, ScalarParam
 from pyomo.core.base.expression import _GeneralExpressionData, ScalarExpression
 from pyomo.core.base.set import Binary, Integers
 from pyomo.core.expr import numeric_expr
 from pyomo.common.timing import HierarchicalTimer
 from pyomo.core.staleflag import StaleFlagManager
-from pyomo.common.collections import ComponentMap
+from pyomo.common.collections import ComponentMap, ComponentSet
 from pyomo.core.expr.visitor import StreamBasedExpressionVisitor, polynomial_degree
 from pyomo.core.base import SymbolMap, NumericLabeler, TextLabeler
 from pyomo.contrib.appsi.utils.get_objective import get_objective
@@ -24,11 +24,13 @@ from pyomo.common.tee import capture_output, TeeStream
 from pyomo.common.config import ConfigValue, NonNegativeInt
 import sys
 import logging
+from typing import Optional
 try:
     import pyscipopt
     from pyscipopt import Model
     scip_available = True
 except:
+    Model = None
     scip_available = False
 
 
@@ -42,12 +44,16 @@ class PyomoToScipVisitor(StreamBasedExpressionVisitor):
         scip_model: Model,
         symbol_map: SymbolMap,
         labeler,
+        only_child_vars: bool,
+        accepted_vars: Optional[ComponentSet] = None,
     ):
         super().__init__()
         self.var_map = var_map
         self.scip_model = scip_model
         self._symbol_map = symbol_map
         self._labeler = labeler
+        self._only_child_vars = only_child_vars
+        self._accepted_vars = accepted_vars
 
         self._handlers = h = dict()
         h[_GeneralVarData] = self._handle_var
@@ -86,6 +92,9 @@ class PyomoToScipVisitor(StreamBasedExpressionVisitor):
     def _handle_var(self, node: _GeneralVarData, data):
         if node in self.var_map:
             return self.var_map[node]
+        
+        if self._only_child_vars and node not in self._accepted_vars:
+            raise RuntimeError('Constraint or objective uses variables that live outside the block being solved')
         
         if node.is_fixed():
             return node.value
@@ -160,12 +169,19 @@ class PyomoToScipVisitor(StreamBasedExpressionVisitor):
         return self._handlers[type(node)](node, data)
 
 
-def create_scip_model(pyomo_model: _BlockData, symbol_map, labeler):
+def create_scip_model(pyomo_model: _BlockData, symbol_map, labeler, only_child_vars: bool):
     pm = pyomo_model
     m = Model()
 
+    if only_child_vars:
+        accepted_vars = ComponentSet()
+        for v in pm.component_data_objects(Var, descend_into=True):
+            accepted_vars.add(v)
+    else:
+        accepted_vars = None
+
     var_map = ComponentMap()
-    visitor = PyomoToScipVisitor(var_map, m, symbol_map=symbol_map, labeler=labeler)
+    visitor = PyomoToScipVisitor(var_map, m, symbol_map=symbol_map, labeler=labeler, only_child_vars=only_child_vars, accepted_vars=accepted_vars)
 
     for con in pm.component_data_objects(Constraint, descend_into=True, active=True):
         scip_body = visitor.walk_expression(con.body)
@@ -227,11 +243,12 @@ class ScipResults(Results):
 
 
 class Scip(Solver):
-    def __init__(self) -> None:
+    def __init__(self, only_child_vars: bool = False) -> None:
         super().__init__()
         self._config = ScipConfig()
         self._options = dict()
         self._symbol_map = None
+        self._only_child_vars = only_child_vars
 
     def available(self):
         if scip_available:
@@ -347,7 +364,7 @@ class Scip(Solver):
             labeler = NumericLabeler('x')
 
         timer.start('create SCIP model')
-        scip_model, var_map = create_scip_model(model, symbol_map=self._symbol_map, labeler=labeler)
+        scip_model, var_map = create_scip_model(model, symbol_map=self._symbol_map, labeler=labeler, only_child_vars=self._only_child_vars)
         timer.stop('create SCIP model')
 
         self._set_options(scip_model, var_map)
