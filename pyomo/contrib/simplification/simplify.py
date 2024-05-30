@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2022
+#  Copyright (c) 2008-2024
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -9,56 +9,67 @@
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
-from pyomo.core.expr.sympy_tools import sympy2pyomo_expression, sympyify_expression
-from pyomo.core.expr.numeric_expr import NumericExpression
-from pyomo.core.expr.numvalue import is_fixed, value
-from pyomo.core.expr import native_numeric_types
 import logging
 import warnings
 
-try:
-    from pyomo.contrib.simplification.ginac_interface import GinacInterface
+from pyomo.common.enums import NamedIntEnum
+from pyomo.core.expr.sympy_tools import sympy2pyomo_expression, sympyify_expression
+from pyomo.core.expr.numeric_expr import NumericExpression
+from pyomo.core.expr.numvalue import value, is_constant
 
-    ginac_available = True
-except:
-    GinacInterface = None
-    ginac_available = False
-
-
-logger = logging.getLogger(__name__)
+from pyomo.contrib.simplification.ginac import (
+    interface as ginac_interface,
+    interface_available as ginac_available,
+)
 
 
 def simplify_with_sympy(expr: NumericExpression):
-    if type(expr) in native_numeric_types:
-        return expr
-    om, se = sympyify_expression(expr)
-    se = se.simplify()
-    new_expr = sympy2pyomo_expression(se, om)
-    if is_fixed(new_expr):
+    if is_constant(expr):
+        return value(expr)
+    object_map, sympy_expr = sympyify_expression(expr, keep_mutable_parameters=True)
+    new_expr = sympy2pyomo_expression(sympy_expr.simplify(), object_map)
+    if is_constant(new_expr):
         new_expr = value(new_expr)
     return new_expr
 
 
 def simplify_with_ginac(expr: NumericExpression, ginac_interface):
-    gi = ginac_interface
-    ginac_expr = gi.to_ginac(expr)
-    ginac_expr = ginac_expr.normal()
-    new_expr = gi.from_ginac(ginac_expr)
-    return new_expr
+    if is_constant(expr):
+        return value(expr)
+    ginac_expr = ginac_interface.to_ginac(expr)
+    return ginac_interface.from_ginac(ginac_expr.normal())
 
 
 class Simplifier(object):
-    def __init__(self, suppress_no_ginac_warnings: bool = False) -> None:
-        if ginac_available:
-            self.gi = GinacInterface(False)
-        self.suppress_no_ginac_warnings = suppress_no_ginac_warnings
+    class Mode(NamedIntEnum):
+        auto = 0
+        sympy = 1
+        ginac = 2
 
-    def simplify(self, expr: NumericExpression):
-        if ginac_available:
-            return simplify_with_ginac(expr, self.gi)
+    def __init__(
+        self, suppress_no_ginac_warnings: bool = False, mode: Mode = Mode.auto
+    ) -> None:
+        if mode == Simplifier.Mode.auto:
+            if ginac_available:
+                mode = Simplifier.Mode.ginac
+            else:
+                if not suppress_no_ginac_warnings:
+                    msg = (
+                        "GiNaC does not seem to be available. Using SymPy. "
+                        + "Note that the GiNaC interface is significantly faster."
+                    )
+                    logging.getLogger(__name__).warning(msg)
+                    warnings.warn(msg)
+                mode = Simplifier.Mode.sympy
+
+        if mode == Simplifier.Mode.ginac:
+            self.gi = ginac_interface.GinacInterface(False)
+            self.simplify = self._simplify_with_ginac
         else:
-            if not self.suppress_no_ginac_warnings:
-                msg = f"GiNaC does not seem to be available. Using SymPy. Note that the GiNac interface is significantly faster."
-                logger.warning(msg)
-                warnings.warn(msg)
-            return simplify_with_sympy(expr)
+            self.simplify = self._simplify_with_sympy
+
+    def _simplify_with_ginac(self, expr: NumericExpression):
+        return simplify_with_ginac(expr, self.gi)
+
+    def _simplify_with_sympy(self, expr: NumericExpression):
+        return simplify_with_sympy(expr)

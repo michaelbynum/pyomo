@@ -1,7 +1,7 @@
 //  ___________________________________________________________________________
 //
 //  Pyomo: Python Optimization Modeling Objects
-//  Copyright (c) 2008-2022
+//  Copyright (c) 2008-2024
 //  National Technology and Engineering Solutions of Sandia, LLC
 //  Under the terms of Contract DE-NA0003525 with National Technology and
 //  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -298,7 +298,8 @@ py::object GinacInterface::from_ginac(ex &ge) {
 
 PYBIND11_MODULE(ginac_interface, m) {
   m.def("pyomo_to_ginac", &pyomo_to_ginac);
-  py::class_<PyomoExprTypesSimp>(m, "PyomoExprTypesSimp").def(py::init<>());
+  py::class_<PyomoExprTypes>(m, "PyomoExprTypes", py::module_local())
+    .def(py::init<>());
   py::class_<ex>(m, "ginac_expression")
     .def("expand", [](ex &ge) {
       return ge.expand();
@@ -313,19 +314,19 @@ PYBIND11_MODULE(ginac_interface, m) {
     .def(py::init<bool>())
     .def("to_ginac", &GinacInterface::to_ginac)
     .def("from_ginac", &GinacInterface::from_ginac);
-  py::enum_<ExprTypeSimp>(m, "ExprTypeSimp")
-      .value("py_float", ExprTypeSimp::py_float)
-      .value("var", ExprTypeSimp::var)
-      .value("param", ExprTypeSimp::param)
-      .value("product", ExprTypeSimp::product)
-      .value("sum", ExprTypeSimp::sum)
-      .value("negation", ExprTypeSimp::negation)
-      .value("external_func", ExprTypeSimp::external_func)
-      .value("power", ExprTypeSimp::power)
-      .value("division", ExprTypeSimp::division)
-      .value("unary_func", ExprTypeSimp::unary_func)
-      .value("linear", ExprTypeSimp::linear)
-      .value("named_expr", ExprTypeSimp::named_expr)
-      .value("numeric_constant", ExprTypeSimp::numeric_constant)
+  py::enum_<ExprType>(m, "ExprType", py::module_local())
+      .value("py_float", ExprType::py_float)
+      .value("var", ExprType::var)
+      .value("param", ExprType::param)
+      .value("product", ExprType::product)
+      .value("sum", ExprType::sum)
+      .value("negation", ExprType::negation)
+      .value("external_func", ExprType::external_func)
+      .value("power", ExprType::power)
+      .value("division", ExprType::division)
+      .value("unary_func", ExprType::unary_func)
+      .value("linear", ExprType::linear)
+      .value("named_expr", ExprType::named_expr)
+      .value("numeric_constant", ExprType::numeric_constant)
       .export_values();
 }
