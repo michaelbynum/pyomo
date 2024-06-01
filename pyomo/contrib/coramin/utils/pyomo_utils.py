@@ -37,9 +37,9 @@ def identify_variables_with_cache(con: _GeneralConstraintData, include_fixed=Fal
         vlist = _var_cache[con][0]
     else:
         vlist = list(identify_variables(e, include_fixed=True))
+    _var_cache[con] = (vlist, e)
     if not include_fixed:
         vlist = [i for i in vlist if not i.fixed]
-    _var_cache[con] = (vlist, e)
     return vlist
 
 
