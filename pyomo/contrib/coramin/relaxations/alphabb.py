@@ -1,5 +1,5 @@
 from pyomo.contrib.coramin.utils.coramin_enums import EigenValueBounder, RelaxationSide
-from pyomo.contrib.coramin.relaxations.custom_block import declare_custom_block
+from pyomo.core.base.block import declare_custom_block
 from pyomo.contrib.coramin.relaxations.relaxations_base import BaseRelaxationData
 from pyomo.contrib.coramin.relaxations.hessian import Hessian
 from typing import Optional, Tuple

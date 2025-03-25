@@ -1,5 +1,4 @@
-from pyomo.core.base.block import _BlockData, Block
-from .custom_block import declare_custom_block
+from pyomo.core.base.block import _BlockData, Block, declare_custom_block
 import weakref
 import pyomo.environ as pe
 from collections.abc import Iterable
