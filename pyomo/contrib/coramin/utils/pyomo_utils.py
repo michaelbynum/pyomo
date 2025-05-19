@@ -8,6 +8,7 @@ from pyomo.core.expr.visitor import identify_variables
 from pyomo.contrib.simplification import Simplifier
 from weakref import WeakKeyDictionary
 from typing import Optional, List
+from pyomo.common.errors import PyomoException
 
 
 def get_objective(m: BlockData) -> Optional[ObjectiveData]:
@@ -27,7 +28,7 @@ def get_objective(m: BlockData) -> Optional[ObjectiveData]:
         Objective, descend_into=True, active=True, sort=True
     ):
         if obj is not None:
-            raise ValueError('Found multiple active objectives')
+            raise PyomoException('Found multiple active objectives')
         obj = o
     return obj
 
