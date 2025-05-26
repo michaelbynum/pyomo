@@ -1,11 +1,33 @@
 import pyomo.environ as pe
-from pyomo.core.expr.numeric_expr import NumericExpression, MinExpression, MaxExpression
+from pyomo.core.expr.numeric_expr import (
+    NumericExpression, 
+    MinExpression, 
+    MaxExpression,
+    NegationExpression,
+    NPV_NegationExpression,
+    PowExpression,
+    NPV_PowExpression,
+    ProductExpression,
+    NPV_ProductExpression,
+    MonomialTermExpression,
+    DivisionExpression,
+    NPV_DivisionExpression,
+    SumExpression,
+    LinearExpression,
+    NPV_SumExpression,
+    UnaryFunctionExpression,
+    NPV_UnaryFunctionExpression,
+)
+from pyomo.core.base.var import VarData, ScalarVar
+from pyomo.core.base.param import ParamData, ScalarParam
 from pyomo.common.numeric_types import native_numeric_types
 from pyomo.core.expr.visitor import StreamBasedExpressionVisitor, native_numeric_types
 from pyomo.contrib.fbbt import interval
 from pyomo.contrib.fbbt.fbbt import compute_bounds_on_expr
 import math
 from scipy.optimize import bisect
+from pyomo.core.expr.calculus.diff_with_pyomo import reverse_sd
+import warnings
 
 
 def log(x):
@@ -15,6 +37,9 @@ def log(x):
 
 
 def golden_section_search(func, lb, ub, minimize=True):
+    assert lb < math.inf
+    assert ub > -math.inf
+
     x1 = lb
     x4 = ub
     f1 = func(x1)
@@ -24,17 +49,45 @@ def golden_section_search(func, lb, ub, minimize=True):
     delta = x4 - x1
     tol = 1e-12
     if f1 <= f4:
-        best = x1
+        if minimize:
+            best = x1
+        else:
+            best = x4
     else:
-        best = x4
-    while delta > tol * min(abs(x1), abs(x4)):
-        a = delta - (golden_ratio * delta) / (golden_ratio + 1)
-        x2 = x1 + a
-        b = x4 - x2
-        c = a**2 / b
-        x3 = x2 + c
-        assert (x4 - x3) / (x3 - x2) == golden_ratio
-        assert (x2 - x1) / (x3 - x2) == golden_ratio
+        if minimize:
+            best = x4
+        else:
+            best = x1
+    inf_step = 1
+    while delta > tol * min(abs(x1), abs(x4)) or math.isinf(delta):
+        if x1 == -math.inf and x4 <= -1e100:
+            # assume the answer is -inf
+            assert best == x1
+            return x1
+        if x4 == math.inf and x1 >= 1e100:
+            # assume the answer is inf
+            assert best == x4
+            return x4
+
+        if x1 == -math.inf and x4 == math.inf:
+            x2 = -1
+            x3 = 1
+        elif x1 == -math.inf:
+            x3 = x4 - inf_step
+            x2 = x3 - inf_step
+            inf_step *= 2
+        elif x4 == math.inf:
+            x2 = x1 + inf_step
+            x3 = x2 + inf_step
+            inf_step *= 2
+        else:
+            a = delta - (golden_ratio * delta) / (golden_ratio + 1)
+            x2 = x1 + a
+            b = x4 - x2
+            c = a**2 / b
+            x3 = x2 + c
+            assert (x4 - x3) / (x3 - x2) == golden_ratio
+            assert (x2 - x1) / (x3 - x2) == golden_ratio
 
         f2 = func(x2)
         f3 = func(x3)
@@ -77,7 +130,7 @@ class MidExpression(NumericExpression):
         return f"{self.getname()}({', '.join(values)})"
 
 
-def handle_sum_expression(data, feasibility_tol):
+def handle_sum_expression(node, data, feasibility_tol):
     under = 0
     over = 0
     lb = 0
@@ -93,7 +146,7 @@ def handle_sum_expression(data, feasibility_tol):
     return [under, over, lb, ub]
 
 
-def handle_product_expression(data, feasibility_tol):
+def handle_product_expression(node, data, feasibility_tol):
     assert len(data) == 2
     arg1_data, arg2_data = data
     under1, over1, lb1, ub1 = arg1_data
@@ -122,66 +175,21 @@ def handle_product_expression(data, feasibility_tol):
     return [under, over, lb, ub]
 
 
-def handle_log_expression(data, feasibility_tol):
-    return handle_concave_univariate(func=log, data=data, feasibility_tol=feasibility_tol)
-    # assert len(data) == 1
-    # arg_under, arg_over, arg_lb, arg_ub = data[0]
-
-    # if arg_under is None or arg_over is None:
-    #     return [None, None, None, None]
-
-    # if arg_lb < 0:
-    #     arg_lb = 0
-
-    # lb, ub = interval.log(arg_lb, arg_ub)
-    # minimizer = arg_lb
-    # maximizer = arg_ub
-    # hmin = MidExpression((arg_under, arg_over, minimizer))
-    # hmax = MidExpression((arg_under, arg_over, maximizer))
-    # if arg_lb == 0:
-    #     under = -math.inf
-    # else:
-    #     xl, xu = arg_lb, arg_ub
-    #     yl = math.log(xl)
-    #     yu = math.log(xu)
-    #     m = (yu - yl) / (xu - xl)
-    #     b = yu - m * xu
-    #     under = m * hmin + b
-    # over = pe.log(hmax)
-    # under = MidExpression((lb, ub, under))
-    # over = MidExpression((lb, ub, over))
-    # return [under, over, lb, ub]
+def handle_log_expression(node, data, feasibility_tol):
+    if data[0][2] < 0:
+        # argument must be nonnegative
+        data[0][2] = 0
+    return handle_concave_univariate(node=node, func=log, data=data, feasibility_tol=feasibility_tol)
 
 
-def handle_exp_expression(data, feasibility_tol):
+def handle_exp_expression(node, data, feasibility_tol):
     def func(x):
         return pe.exp(x)
     
-    return handle_convex_univariate(func=func, data=data, feasibility_tol=feasibility_tol)
-    # assert len(data) == 1
-    # arg_under, arg_over, arg_lb, arg_ub = data[0]
-
-    # if arg_under is None or arg_over is None:
-    #     return [None, None, None, None]
-
-    # lb, ub = interval.exp(arg_lb, arg_ub)
-    # minimizer = arg_lb
-    # maximizer = arg_ub
-    # hmin = MidExpression((arg_under, arg_over, minimizer))
-    # hmax = MidExpression((arg_under, arg_over, maximizer))
-    # xl, xu = arg_lb, arg_ub
-    # yl = math.exp(xl)
-    # yu = math.exp(xu)
-    # m = (yu - yl) / (xu - xl)
-    # b = yu - m * xu
-    # under = pe.exp(hmin)
-    # over = m * hmax + b
-    # under = MidExpression((lb, ub, under))
-    # over = MidExpression((lb, ub, over))
-    # return [under, over, lb, ub]
+    return handle_convex_univariate(node=node, func=func, data=data, feasibility_tol=feasibility_tol)
 
 
-def handle_negation_expression(data, feasibility_tol):
+def handle_negation_expression(node, data, feasibility_tol):
     assert len(data) == 1
     arg_under, arg_over, arg_lb, arg_ub = data[0]
 
@@ -200,7 +208,7 @@ def handle_negation_expression(data, feasibility_tol):
     return [under, over, lb, ub]
 
 
-def handle_convex_univariate(func, data, feasibility_tol):
+def handle_convex_univariate(node, func, data, feasibility_tol):
     assert len(data) == 1
     arg_under, arg_over, arg_lb, arg_ub = data[0]
 
@@ -216,21 +224,38 @@ def handle_convex_univariate(func, data, feasibility_tol):
         lb = -math.inf
     if ub is None:
         ub = math.inf
-    if not math.isfinite(arg_lb) or not math.isfinite(arg_ub):
-        return [lb, ub, lb, ub]
-    minimizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=True)
-    maximizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=False)
+
+    # see if the function is monotonically increasing or decreasing
+    der = reverse_sd(expr)[m.x]
+    der_lb, der_ub = compute_bounds_on_expr(der)
+    if der_lb is None:
+        der_lb = -math.inf
+    if der_ub is None:
+        der_ub = math.inf
+
+    if der_lb >= 0:
+        # monotonically increasing
+        minimizer = arg_lb
+        maximizer = arg_ub
+    elif der_ub <= 0:
+        # monotonically decreasing
+        minimizer = arg_ub
+        maximizer = arg_lb
+    else:
+        minimizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=True)
+        maximizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=False)
+
     if func(minimizer) > lb:
         lb = func(minimizer)
     if func(maximizer) < ub:
         ub = func(maximizer)
-    hmin = MidExpression((arg_under, arg_over, minimizer))
-    hmax = MidExpression((arg_under, arg_over, maximizer))
 
+    hmin = MidExpression((arg_under, arg_over, minimizer))
     under = func(hmin)
     under = MidExpression((lb, ub, under))
 
-    if math.isfinite(lb) and math.isfinite(ub):
+    hmax = MidExpression((arg_under, arg_over, maximizer))
+    if math.isfinite(lb) and math.isfinite(ub) and math.isfinite(arg_lb) and math.isfinite(arg_ub):
         xl, xu = arg_lb, arg_ub
         yl = func(xl)
         yu = func(xu)
@@ -243,7 +268,7 @@ def handle_convex_univariate(func, data, feasibility_tol):
     return [under, over, lb, ub]    
 
 
-def handle_concave_univariate(func, data, feasibility_tol):
+def handle_concave_univariate(node, func, data, feasibility_tol):
     assert len(data) == 1
     arg_under, arg_over, arg_lb, arg_ub = data[0]
 
@@ -259,21 +284,38 @@ def handle_concave_univariate(func, data, feasibility_tol):
         lb = -math.inf
     if ub is None:
         ub = math.inf
-    if not math.isfinite(arg_lb) or not math.isfinite(arg_ub):
-        return [lb, ub, lb, ub]
-    minimizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=True)
-    maximizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=False)
+
+    # see if the function is monotonically increasing or decreasing
+    der = reverse_sd(expr)[m.x]
+    der_lb, der_ub = compute_bounds_on_expr(der)
+    if der_lb is None:
+        der_lb = -math.inf
+    if der_ub is None:
+        der_ub = math.inf
+
+    if der_lb >= 0:
+        # monotonically increasing
+        minimizer = arg_lb
+        maximizer = arg_ub
+    elif der_ub <= 0:
+        # monotonically decreasing
+        minimizer = arg_ub
+        maximizer = arg_lb
+    else:
+        minimizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=True)
+        maximizer = golden_section_search(func=func, lb=arg_lb, ub=arg_ub, minimize=False)
+
     if func(minimizer) > lb:
         lb = func(minimizer)
     if func(maximizer) < ub:
         ub = func(maximizer)
-    hmin = MidExpression((arg_under, arg_over, minimizer))
-    hmax = MidExpression((arg_under, arg_over, maximizer))
 
+    hmax = MidExpression((arg_under, arg_over, maximizer))
     over = func(hmax)
     over = MidExpression((lb, ub, over))
 
-    if math.isfinite(lb) and math.isfinite(ub):
+    hmin = MidExpression((arg_under, arg_over, minimizer))
+    if math.isfinite(lb) and math.isfinite(ub) and math.isfinite(arg_lb) and math.isfinite(arg_ub):
         xl, xu = arg_lb, arg_ub
         yl = func(xl)
         yu = func(xu)
@@ -286,67 +328,36 @@ def handle_concave_univariate(func, data, feasibility_tol):
     return [under, over, lb, ub]
 
 
-# def handle_convex_pow_fixed_exponent_greater_than_one(data, feasibility_tol):
-#     arg1_data, arg2_data = data
-#     under1, over1, lb1, ub1 = arg1_data
-#     under2, over2, lb2, ub2 = arg2_data
-
-#     assert lb2 == ub2
-#     assert lb2 > 1
-
-#     if under1 is None or over1 is None:
-#         return [None, None, None, None]
-
-#     exponent = lb2
-#     lb, ub = interval.power(lb1, ub1, exponent, exponent, feasibility_tol=feasibility_tol)
-#     if lb1 <= 0 <= ub1:
-#         minimizer = 0
-#     elif lb1 > 0:
-#         minimizer = lb1
-#     else:
-#         assert ub1 < 0
-#         minimizer = ub1
-#     if lb1**exponent >= ub1**exponent:
-#         maximizer = lb1
-#     else:
-#         maximizer = ub1
-#     hmin = MidExpression((under1, over1, minimizer))
-#     hmax = MidExpression((under1, over1, maximizer))
-#     xl, xu = lb1, ub1
-#     yl = xl ** exponent
-#     yu = xu ** exponent
-#     m = (yu - yl) / (xu - xl)
-#     b = yu - m * xu
-#     under = hmin ** exponent
-#     over = m * hmax + b
-#     under = MidExpression((lb, ub, under))
-#     over = MidExpression((lb, ub, over))
-#     return [under, over, lb, ub]
-
-
-def handle_pow_positive_base(data, feasibility_tol):
+def handle_pow_positive_base(node, data, feasibility_tol):
     # if the base is positive, we can use a log tranformation
     # exp(arg2 * log(arg1))
     arg1_data, arg2_data = data
     under1, over1, lb1, ub1 = arg1_data
     under2, over2, lb2, ub2 = arg2_data
+    arg1, arg2 = node.args
 
     assert lb1 >= 0
 
     if under1 is None or over1 is None or under2 is None or over2 is None:
         return [None, None, None, None]
     
+    log_arg = pe.log(arg1)
     log_under, log_over, log_lb, log_ub = handle_log_expression(
+        node=log_arg,
         data=[(under1, over1, lb1, ub1)], 
         feasibility_tol=feasibility_tol,
     )
 
+    prod_arg = arg2 * log_arg
     prod_under, prod_over, prod_lb, prod_ub = handle_product_expression(
+        node=prod_arg,
         data=[(under2, over2, lb2, ub2), (log_under, log_over, log_lb, log_ub)],
         feasibility_tol=feasibility_tol,
     )
 
+    exp_arg = pe.exp(prod_arg)
     exp_under, exp_over, exp_lb, exp_ub = handle_exp_expression(
+        node=exp_arg,
         data=[(prod_under, prod_over, prod_lb, prod_ub)],
         feasibility_tol=feasibility_tol,
     )
@@ -442,7 +453,7 @@ def get_pow_positive_odd_exponent_overestimator(exponent, lb, ub, feasbility_tol
     return x, m, b
 
 
-def handle_pow_positive_odd_exponent(data, feasibility_tol):
+def handle_pow_positive_odd_exponent(node, data, feasibility_tol):
     arg1_data, arg2_data = data
     under1, over1, lb1, ub1 = arg1_data
     under2, over2, lb2, ub2 = arg2_data
@@ -497,7 +508,7 @@ def handle_pow_positive_odd_exponent(data, feasibility_tol):
     return [under, over, lb, ub]
 
 
-def handle_pow_expression(data, feasibility_tol):
+def handle_pow_expression(node, data, feasibility_tol):
     arg1_data, arg2_data = data
     under1, over1, lb1, ub1 = arg1_data
     under2, over2, lb2, ub2 = arg2_data
@@ -513,24 +524,24 @@ def handle_pow_expression(data, feasibility_tol):
 
         if exponent > 1:
             if lb1 >= 0:
-                return handle_convex_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
             elif exponent == round(exponent) and exponent % 2 == 0:
                 # exponent is fixed and even
-                return handle_convex_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
             elif exponent == round(exponent) and exponent % 2 == 1:
                 # exponent is fixed and odd
                 if ub1 <= 0:
-                    return handle_concave_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+                    return handle_concave_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
                 else:
                     assert lb1 < 0 < ub1
-                    return handle_pow_positive_odd_exponent(data, feasibility_tol)
+                    return handle_pow_positive_odd_exponent(node=node, data, feasibility_tol)
             else:
                 # exponent is fixed, fractional, and greater than 1
                 assert exponent != round(exponent)
                 # base has to be positive
                 data[0][2] = max(0, data[0][2])
                 assert data[0][3] >= data[0][2]
-                return handle_convex_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
         elif exponent == 1:
             return [under1, over1, lb1, ub1]
         elif exponent > 0:
@@ -538,7 +549,7 @@ def handle_pow_expression(data, feasibility_tol):
             # base has to be positive
             data[0][2] = max(0, data[0][2])
             assert data[0][3] >= data[0][2]
-            return handle_concave_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            return handle_concave_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
         elif exponent == 0:
             return [1, 1, 1, 1]
         elif exponent > -1:
@@ -546,25 +557,146 @@ def handle_pow_expression(data, feasibility_tol):
             # base has to be positive
             data[0][2] = max(0, data[0][2])
             assert data[0][3] >= data[0][2]
-            return handle_convex_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            def func(x):
+                if type(x) in native_numeric_types and x == 0:
+                    return math.inf
+                return x ** exponent
+            return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
         elif exponent == round(exponent) and exponent % 2 == 1:
+            # odd, negative exponent
             if lb1 >= 0:
-                return handle_convex_univariate(func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
-            elif lb1 == 0:
-                
+                def func(x):
+                    if type(x) in native_numeric_types and x == 0:
+                        return math.inf
+                    return x ** exponent
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            elif ub1 <= 0:
+                def func(x):
+                    if type(x) in native_numeric_types and x == 0:
+                        return -math.inf
+                    return x ** exponent
+                return handle_concave_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            else:
+                return [-math.inf, math.inf, -math.inf, math.inf]
+        elif exponent == round(exponent) and exponent % 2 == 0:
+            # even, negative exponent
+            def func(x):
+                if type(x) in native_numeric_types and x == 0:
+                    return math.inf
+                return x ** exponent
+            if lb1 >= 0:
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            elif ub1 <= 0:
+                return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+            else:
+                # get a lower bound
+                m = pe.ConcreteModel()
+                m.x = pe.Var(lb=lb1, ub=ub1)
+                expr = m.x ** exponent
+                lb, ub = compute_bounds_on_expr(expr)
+                return [lb, ub, lb, ub]
+        else:
+            # negative fractional exponent
+            assert exponent != round(exponent)
+            assert exponent < 0
+            def func(x):
+                if type(x) in native_numeric_types and x == 0:
+                    return math.inf
+                return x ** exponent
+            return handle_convex_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
+    else:
+        # variable exponent
+        # assume the base has to be positive
+        if lb1 < 0:
+            msg = f"found a variable exponent with a base that is potentially negative: {str(node)}; assuming the base is positive"
+            data[0][2] = max(0, data[0][2])
+            assert data[0][3] >= data[0][2]
+        return handle_pow_positive_base(node=node, data=data, feasibility_tol=feasibility_tol)
 
 
-
-# class RelaxationVisitor(StreamBasedExpressionVisitor):
-#     def initialize_walker(self, expr):
-#         if type(expr) in native_numeric_types:
-#             return False, expr
-        
-#         return True, None    
-
-#     def exitNode(self, node, data):
+def handle_float(node, data, feasibility_tol):
+    val = float(node)
+    return [val, val, val, val]
 
 
+def handle_param(node, data, feasibility_tol):
+    return [node.value, node.value, node.value, node.value]
 
-# def generate_relaxation(expr: NumericExpression):
-#     visitor = 
+
+def handle_var(node, data, feasibility_tol):
+    if node.is_fixed():
+        return [node.value, node.value, node.value, node.value]
+    else:
+        under = node
+        over = node
+        lb = node.lb
+        if lb is None:
+            lb = -math.inf
+        ub = node.ub
+        if ub is None:
+            ub = math.inf
+        return [node, node, lb, ub]
+
+
+unary_handlers = {
+    'exp': handle_exp_expression,
+    'log': handle_log_expression,
+}
+
+
+def handle_univariate_expression(node, data, feasibility_tol):
+    if node.getname() in unary_handlers:
+        return unary_handlers[node.getname()](node, data, feasibility_tol)
+    else:
+        raise NotImplementedError(f'cannot yet generate relaxations for {node.getname()} expressions')
+
+
+handlers = {
+    NegationExpression: handle_negation_expression,
+    NPV_NegationExpression: handle_negation_expression,
+    PowExpression: handle_pow_expression,
+    NPV_PowExpression: handle_pow_expression,
+    ProductExpression: handle_product_expression,
+    NPV_ProductExpression: handle_product_expression,
+    MonomialTermExpression: handle_product_expression,
+    SumExpression: handle_sum_expression,
+    LinearExpression: handle_sum_expression,
+    NPV_SumExpression: handle_sum_expression,
+    UnaryFunctionExpression: handle_univariate_expression,
+    NPV_UnaryFunctionExpression: handle_univariate_expression,
+    VarData: handle_var,
+    ScalarVar: handle_var,
+    ParamData: handle_param,
+    ScalarParam: handle_param,
+}
+
+
+for t in native_numeric_types:
+    handlers[t] = handle_float
+
+
+class RelaxationVisitor(StreamBasedExpressionVisitor):
+    def __init__(self, feasibility_tol=1e-8, **kwds):
+        self.feasibility_tol = feasibility_tol
+        super().__init__(**kwds)
+
+    def exitNode(self, node, data):
+        node_type = type(node)
+        if node_type not in handlers:
+            if node_type in native_numeric_types:
+                handlers[node_type] = handle_float
+            else:
+                raise NotImplementedError(f'cannot yet generate relaxations for {node_type} expressions')
+        return handlers[node_type](node, data, self.feasibility_tol)
+    
+
+relaxation_visitor = RelaxationVisitor()
+
+
+def generate_relaxation(expr: NumericExpression, feasibility_tol=1e-8):
+    visitor = relaxation_visitor
+    orig_feasibility_tol = visitor.feasibility_tol
+    visitor.feasibility_tol = feasibility_tol
+    under, over, lb, ub = visitor.walk_expression(expr)
+    visitor.feasibility_tol = orig_feasibility_tol
+    return under, over, lb, ub
