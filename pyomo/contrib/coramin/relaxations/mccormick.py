@@ -59,7 +59,7 @@ def golden_section_search(func, lb, ub, minimize=True):
         else:
             best = x1
     inf_step = 1
-    while delta > tol * min(abs(x1), abs(x4)) or math.isinf(delta):
+    while (delta > tol * min(abs(x1), abs(x4)) and delta > tol) or math.isinf(delta):
         if x1 == -math.inf and x4 <= -1e100:
             # assume the answer is -inf
             assert best == x1
@@ -86,8 +86,8 @@ def golden_section_search(func, lb, ub, minimize=True):
             b = x4 - x2
             c = a**2 / b
             x3 = x2 + c
-            assert (x4 - x3) / (x3 - x2) == golden_ratio
-            assert (x2 - x1) / (x3 - x2) == golden_ratio
+            assert math.isclose((x4 - x3) / (x3 - x2), golden_ratio, rel_tol=1e-2, abs_tol=1e-2)
+            assert math.isclose((x2 - x1) / (x3 - x2), golden_ratio, rel_tol=1e-2, abs_tol=1e-2)
 
         f2 = func(x2)
         f3 = func(x3)
@@ -106,6 +106,7 @@ def golden_section_search(func, lb, ub, minimize=True):
         else:
             x1 = x2
             f1 = f2
+        delta = x4 - x1
     return best
 
 
@@ -216,7 +217,7 @@ def handle_convex_univariate(node, func, data, feasibility_tol):
         return [None, None, None, None]
 
     m = pe.ConcreteModel()
-    m.x = pe.Var(lb=arg_lb, ub=arg_ub)
+    m.x = pe.Var(bounds=(arg_lb, arg_ub))
     expr = func(m.x)
 
     lb, ub = compute_bounds_on_expr(expr)
@@ -276,7 +277,7 @@ def handle_concave_univariate(node, func, data, feasibility_tol):
         return [None, None, None, None]
 
     m = pe.ConcreteModel()
-    m.x = pe.Var(lb=arg_lb, ub=arg_ub)
+    m.x = pe.Var(bounds=(arg_lb, arg_ub))
     expr = func(m.x)
 
     lb, ub = compute_bounds_on_expr(expr)
@@ -534,7 +535,7 @@ def handle_pow_expression(node, data, feasibility_tol):
                     return handle_concave_univariate(node=node, func=func, data=[arg1_data], feasibility_tol=feasibility_tol)
                 else:
                     assert lb1 < 0 < ub1
-                    return handle_pow_positive_odd_exponent(node=node, data, feasibility_tol)
+                    return handle_pow_positive_odd_exponent(node=node, data=data, feasibility_tol=feasibility_tol)
             else:
                 # exponent is fixed, fractional, and greater than 1
                 assert exponent != round(exponent)
@@ -591,7 +592,7 @@ def handle_pow_expression(node, data, feasibility_tol):
             else:
                 # get a lower bound
                 m = pe.ConcreteModel()
-                m.x = pe.Var(lb=lb1, ub=ub1)
+                m.x = pe.Var(bounds=(lb1, ub1))
                 expr = m.x ** exponent
                 lb, ub = compute_bounds_on_expr(expr)
                 return [lb, ub, lb, ub]
