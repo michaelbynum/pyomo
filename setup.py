@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -16,6 +16,7 @@ Script to generate the installer for pyomo.
 import os
 import platform
 import sys
+from pathlib import Path
 from setuptools import setup, find_packages, Command
 
 try:
@@ -53,19 +54,30 @@ def get_version():
     return import_pyomo_module('pyomo', 'version', 'info.py')['__version__']
 
 
+def check_config_arg(name):
+    if name in sys.argv:
+        sys.argv.remove(name)
+        return True
+    if name in os.getenv('PYOMO_SETUP_ARGS', '').split():
+        return True
+    return False
+
+
 CYTHON_REQUIRED = "required"
 if not any(
-    arg.startswith(cmd) for cmd in ('build', 'install', 'bdist') for arg in sys.argv
+    arg.startswith(cmd)
+    for cmd in ('build', 'install', 'bdist', 'wheel')
+    for arg in sys.argv
 ):
     using_cython = False
-else:
+elif sys.version_info[:2] < (3, 11):
     using_cython = "automatic"
-if '--with-cython' in sys.argv:
-    using_cython = CYTHON_REQUIRED
-    sys.argv.remove('--with-cython')
-if '--without-cython' in sys.argv:
+else:
     using_cython = False
-    sys.argv.remove('--without-cython')
+if check_config_arg('--with-cython'):
+    using_cython = CYTHON_REQUIRED
+if check_config_arg('--without-cython'):
+    using_cython = False
 
 ext_modules = []
 if using_cython:
@@ -107,14 +119,7 @@ ERROR: Cython was explicitly requested with --with-cython, but cythonization
             raise
         using_cython = False
 
-if ('--with-distributable-extensions' in sys.argv) or (
-    os.getenv('PYOMO_SETUP_ARGS') is not None
-    and '--with-distributable-extensions' in os.getenv('PYOMO_SETUP_ARGS')
-):
-    try:
-        sys.argv.remove('--with-distributable-extensions')
-    except:
-        pass
+if check_config_arg('--with-distributable-extensions'):
     #
     # Import the APPSI extension builder
     # NOTE: There is inconsistent behavior in Windows for APPSI.
@@ -200,47 +205,8 @@ class DependenciesCommand(Command):
 
 
 setup_kwargs = dict(
-    name='Pyomo',
-    #
-    # Note: the release number is set in pyomo/version/info.py
-    #
     cmdclass={'dependencies': DependenciesCommand},
     version=get_version(),
-    maintainer='Pyomo Developer Team',
-    maintainer_email='pyomo-developers@googlegroups.com',
-    url='http://pyomo.org',
-    project_urls={
-        'Documentation': 'https://pyomo.readthedocs.io/',
-        'Source': 'https://github.com/Pyomo/pyomo',
-    },
-    license='BSD',
-    platforms=["any"],
-    description='Pyomo: Python Optimization Modeling Objects',
-    long_description=read('README.md'),
-    long_description_content_type='text/markdown',
-    keywords=['optimization'],
-    classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'Intended Audience :: End Users/Desktop',
-        'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: BSD License',
-        'Natural Language :: English',
-        'Operating System :: MacOS',
-        'Operating System :: Microsoft :: Windows',
-        'Operating System :: Unix',
-        'Programming Language :: Python',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
-        'Programming Language :: Python :: 3.12',
-        'Programming Language :: Python :: Implementation :: CPython',
-        'Programming Language :: Python :: Implementation :: PyPy',
-        'Topic :: Scientific/Engineering :: Mathematics',
-        'Topic :: Software Development :: Libraries :: Python Modules',
-    ],
-    python_requires='>=3.8',
     install_requires=['ply'],
     extras_require={
         # There are certain tests that also require pytest-qt, but because those
@@ -248,20 +214,20 @@ setup_kwargs = dict(
         # the dependencies.
         'tests': ['coverage', 'parameterized', 'pybind11', 'pytest', 'pytest-parallel'],
         'docs': [
-            'Sphinx>4',
+            'Sphinx>4,!=8.2.0',
             'sphinx-copybutton',
             'sphinx_rtd_theme>0.5',
             'sphinxcontrib-jsmath',
             'sphinxcontrib-napoleon',
             'sphinx-toolbox>=2.16.0',
             'sphinx-jinja2-compat>=0.1.1',
-            'enum_tools',
             'numpy',  # Needed by autodoc for pynumero
             'scipy',  # Needed by autodoc for pynumero
         ],
         'optional': [
             'dill',  # No direct use, but improves lambda pickle
             'ipython',  # contrib.viewer
+            'linear-tree',  # contrib.piecewise
             # Note: matplotlib 3.6.1 has bug #24127, which breaks
             # seaborn's histplot (triggering parmest failures)
             # Note: minimum version from community_detection use of
@@ -312,18 +278,22 @@ setup_kwargs = dict(
         "pyomo.contrib.simplification.ginac": ["src/*.cpp", "src/*.hpp"],
     },
     ext_modules=ext_modules,
-    entry_points="""
-    [console_scripts]
-    pyomo = pyomo.scripting.pyomo_main:main_console_script
-
-    [pyomo.command]
-    pyomo.help = pyomo.scripting.driver_help
-    pyomo.viewer=pyomo.contrib.viewer.pyomo_viewer
-    """,
 )
 
 
 try:
+    # setuptools.build_meta (>=68) forbids absolute paths in the `sources=` list.
+    # This resets the extensions (only for those items that are absolute paths)
+    # to use relative paths
+    ROOT = Path(__file__).parent.resolve()
+    for ext in ext_modules:
+        rel_sources = []
+        for src in ext.sources:
+            p = Path(src)
+            if p.is_absolute():
+                p = p.relative_to(ROOT)
+            rel_sources.append(p.as_posix())
+        ext.sources[:] = rel_sources
     setup(**setup_kwargs)
 except SystemExit as e_info:
     # Cython can generate a SystemExit exception on Windows if the

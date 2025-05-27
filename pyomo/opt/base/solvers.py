@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -470,8 +470,8 @@ class OptSolver(object):
         Set the current results format (if it's valid for the current
         problem format).
         """
-        if (self._problem_format in self._valid_results_formats) and (
-            format in self._valid_results_formats[self._problem_format]
+        if (self._problem_format in self._valid_result_formats) and (
+            format in self._valid_result_formats[self._problem_format]
         ):
             self._results_format = format
         else:

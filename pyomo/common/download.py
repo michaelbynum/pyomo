@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -177,6 +177,7 @@ class FileDownloader(object):
 
         This method was designed to help identify compatible binaries,
         and will return strings similar to:
+
           - rhel6
           - fedora24
           - ubuntu18.04

@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -10,11 +10,11 @@
 #  ___________________________________________________________________________
 
 
-from .factory import SolverFactory
-from .ipopt import Ipopt
-from .gurobi import Gurobi
-from .gurobi_direct import GurobiDirect
-from .highs import Highs
+from .common.factory import SolverFactory
+from .solvers.ipopt import Ipopt
+from .solvers.gurobi_persistent import GurobiPersistent
+from .solvers.gurobi_direct import GurobiDirect
+from .solvers.highs import Highs
 
 
 def load():
@@ -22,8 +22,10 @@ def load():
         name='ipopt', legacy_name='ipopt_v2', doc='The IPOPT NLP solver'
     )(Ipopt)
     SolverFactory.register(
-        name='gurobi', legacy_name='gurobi_v2', doc='Persistent interface to Gurobi'
-    )(Gurobi)
+        name='gurobi_persistent',
+        legacy_name='gurobi_persistent_v2',
+        doc='Persistent interface to Gurobi',
+    )(GurobiPersistent)
     SolverFactory.register(
         name='gurobi_direct',
         legacy_name='gurobi_direct_v2',

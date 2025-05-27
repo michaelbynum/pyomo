@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -280,7 +280,7 @@ class RadixLinearization(Transformation):
         if type(expr) is PowExpression and value(expr._args[1]) == 2:
             # Note: directly testing the value of the exponent above is
             # safe: we have already verified that this expression is
-            # polynominal, so the exponent must be constant.
+            # polynomial, so the exponent must be constant.
             tmp = ProductExpression()
             tmp._numerator = [expr._args[0], expr._args[0]]
             tmp._denominator = []

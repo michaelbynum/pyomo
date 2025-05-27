@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -39,34 +39,47 @@ except ImportError:
 import pyomo.contrib.viewer.report as rpt
 import pyomo.environ as pyo
 import pyomo.contrib.viewer.qt as myqt
+
+from pyomo.common.fileutils import this_file_dir
+from pyomo.common.flags import building_documentation
 from pyomo.contrib.viewer.model_browser import ModelBrowser
 from pyomo.contrib.viewer.residual_table import ResidualTable
 from pyomo.contrib.viewer.model_select import ModelSelect
 from pyomo.contrib.viewer.ui_data import UIData
-from pyomo.common.fileutils import this_file_dir
 
 _log = logging.getLogger(__name__)
 
-_mypath = this_file_dir()
-try:
-    _MainWindowUI, _MainWindow = myqt.uic.loadUiType(os.path.join(_mypath, "main.ui"))
-except:
-    _log.exception("Failed to load UI files.")
 
-    # This lets the file still be imported, but you won't be able to use it
-    # Allowing this to be imported will let some basic tests pass without PyQt
-    class _MainWindowUI(object):
-        pass
+# This lets the file be imported when the Qt UI is not available (or
+# when building docs), but you won't be able to use it.  Allowing this
+# will let some basic tests run (and pass) without PyQt
+class _MainWindowUI(object):
+    pass
 
-    class _MainWindow(object):
-        pass
 
+class _MainWindow(object):
+    pass
+
+
+# Note that the classes loaded here have signatures that are not
+# parsable by Sphinx, so we won't attempt to import them if we are
+# building the API documentation.
+if not building_documentation():
+    _mypath = this_file_dir()
+    try:
+        _MainWindowUI, _MainWindow = myqt.uic.loadUiType(
+            os.path.join(_mypath, "main.ui")
+        )
+    except:
+        _log.exception("Failed to load UI files.")
 
 for _err in myqt.import_errors:
     _log.error(_err)
 
 
-def get_mainwindow(model=None, show=True, ask_close=True, testing=False):
+def get_mainwindow(
+    model=None, show=True, ask_close=True, model_var_name_in_main=None, testing=False
+):
     """
     Create a UI MainWindow.
 
@@ -79,16 +92,32 @@ def get_mainwindow(model=None, show=True, ask_close=True, testing=False):
         (ui, model): ui is the MainWindow widget, and model is the linked Pyomo
             model.  If no model is provided a new ConcreteModel is created
     """
+    model_name = model_var_name_in_main
     if model is None:
-        model = pyo.ConcreteModel(name="Default")
-    ui = MainWindow(model=model, ask_close=ask_close, testing=testing)
+        import __main__
+
+        if model_name in dir(__main__):
+            if isinstance(getattr(__main__, model_name), pyo.Block):
+                model = getattr(__main__, model_name)
+        else:
+            for s in dir(__main__):
+                if isinstance(getattr(__main__, s), pyo.Block):
+                    model = getattr(__main__, s)
+                    model_name = s
+                    break
+    ui = MainWindow(
+        model=model,
+        model_var_name_in_main=model_name,
+        ask_close=ask_close,
+        testing=testing,
+    )
     try:
         get_ipython().events.register("post_execute", ui.refresh_on_execute)
     except AttributeError:
         pass  # not in ipy kernel, so is fine to not register callback
     if show:
         ui.show()
-    return ui, model
+    return ui
 
 
 class MainWindow(_MainWindow, _MainWindowUI):
@@ -97,6 +126,7 @@ class MainWindow(_MainWindow, _MainWindowUI):
         main = self.main = kwargs.pop("main", None)
         ask_close = self.ask_close = kwargs.pop("ask_close", True)
         self.testing = kwargs.pop("testing", False)
+        model_var_name_in_main = kwargs.pop("model_var_name_in_main", None)
         flags = kwargs.pop("flags", 0)
         self.ui_data = UIData(model=model)
         super().__init__(*args, **kwargs)
@@ -128,6 +158,7 @@ class MainWindow(_MainWindow, _MainWindowUI):
         self.actionCalculateExpressions.triggered.connect(
             self.ui_data.calculate_expressions
         )
+        self.ui_data.model_var_name_in_main = model_var_name_in_main
         self.actionTile.triggered.connect(self.mdiArea.tileSubWindows)
         self.actionCascade.triggered.connect(self.mdiArea.cascadeSubWindows)
         self.actionTabs.triggered.connect(self.toggle_tabs)
@@ -256,6 +287,18 @@ class MainWindow(_MainWindow, _MainWindowUI):
         ipython kernel.  The main purpose of this right now it to refresh the
         UI display so that it matches the current state of the model.
         """
+        if self.ui_data.model_var_name_in_main is not None:
+            import __main__
+
+            try:
+                mname = self.ui_data.model_var_name_in_main
+                mid = id(getattr(__main__, mname))
+                if id(self.ui_data.model) != mid:
+                    self.ui_data.model = getattr(__main__, mname)
+                    self.update_model
+                    return
+            except AttributeError:
+                pass
         for w in self._refresh_list:
             try:
                 w.refresh()

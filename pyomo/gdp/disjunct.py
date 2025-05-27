@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -502,12 +502,6 @@ class Disjunct(Block):
 
 class ScalarDisjunct(DisjunctData, Disjunct):
     def __init__(self, *args, **kwds):
-        ## FIXME: This is a HACK to get around a chicken-and-egg issue
-        ## where BlockData creates the indicator_var *before*
-        ## Block.__init__ declares the _defer_construction flag.
-        self._defer_construction = True
-        self._suppress_ctypes = set()
-
         DisjunctData.__init__(self, self)
         Disjunct.__init__(self, *args, **kwds)
         self._data[None] = self

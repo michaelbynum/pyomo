@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -51,14 +51,7 @@ def _dispatch_var(visitor, node):
 
 
 def _dispatch_param(visitor, node):
-    if int(value(node)) == value(node):
-        return False, node
-    else:
-        raise ValueError(
-            "Found non-integer valued Param '%s' in a logical "
-            "expression. This cannot be written to a disjunctive "
-            "form." % node.name
-        )
+    return False, node
 
 
 def _dispatch_expression(visitor, node):
@@ -244,6 +237,12 @@ class LogicalToDisjunctiveVisitor(StreamBasedExpressionVisitor):
 
     def beforeChild(self, node, child, child_idx):
         if child.__class__ in EXPR.native_types:
+            if child.__class__ is bool:
+                # If we encounter a bool, we are going to need to treat it as
+                # binary explicitly because we are finally pedantic enough in the
+                # expression system to not allow some of the mixing we will need
+                # (like summing a LinearExpression with a bool)
+                return False, int(child)
             return False, child
 
         if child.is_numeric_type():

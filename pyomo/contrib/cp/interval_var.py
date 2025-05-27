@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -167,7 +167,7 @@ class IntervalVar(Block):
         length=None,
         optional=False,
         name=None,
-        doc=None
+        doc=None,
     ): ...
 
     def __init__(self, *args, **kwargs):
@@ -206,8 +206,6 @@ class IntervalVar(Block):
 
 class ScalarIntervalVar(IntervalVarData, IntervalVar):
     def __init__(self, *args, **kwds):
-        self._suppress_ctypes = set()
-
         IntervalVarData.__init__(self, self)
         IntervalVar.__init__(self, *args, **kwds)
         self._data[None] = self

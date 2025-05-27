@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -13,96 +13,51 @@ import os
 
 from pyomo.common import unittest
 from pyomo.common.config import ConfigDict
-from pyomo.contrib.solver import base
+from pyomo.contrib.solver.common import base
+
+
+class _LegacyWrappedSolverBase(base.LegacySolverWrapper, base.SolverBase):
+    pass
 
 
 class TestSolverBase(unittest.TestCase):
-    def test_abstract_member_list(self):
-        expected_list = ['solve', 'available', 'version']
-        member_list = list(base.SolverBase.__abstractmethods__)
-        self.assertEqual(sorted(expected_list), sorted(member_list))
-
     def test_class_method_list(self):
-        expected_list = [
-            'Availability',
-            'CONFIG',
-            'available',
-            'is_persistent',
-            'solve',
-            'version',
-        ]
+        expected_list = ['CONFIG', 'available', 'is_persistent', 'solve', 'version']
         method_list = [
             method for method in dir(base.SolverBase) if method.startswith('_') is False
         ]
         self.assertEqual(sorted(expected_list), sorted(method_list))
 
-    @unittest.mock.patch.multiple(base.SolverBase, __abstractmethods__=set())
     def test_init(self):
-        self.instance = base.SolverBase()
-        self.assertFalse(self.instance.is_persistent())
-        self.assertEqual(self.instance.version(), None)
-        self.assertEqual(self.instance.name, 'solverbase')
-        self.assertEqual(self.instance.CONFIG, self.instance.config)
-        self.assertEqual(self.instance.solve(None), None)
-        self.assertEqual(self.instance.available(), None)
+        instance = base.SolverBase()
+        self.assertFalse(instance.is_persistent())
+        self.assertEqual(instance.name, 'solverbase')
+        self.assertEqual(instance.CONFIG, instance.config)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.version(), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.solve(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.available(), None)
 
-    @unittest.mock.patch.multiple(base.SolverBase, __abstractmethods__=set())
     def test_context_manager(self):
-        with base.SolverBase() as self.instance:
-            self.assertFalse(self.instance.is_persistent())
-            self.assertEqual(self.instance.version(), None)
-            self.assertEqual(self.instance.name, 'solverbase')
-            self.assertEqual(self.instance.CONFIG, self.instance.config)
-            self.assertEqual(self.instance.solve(None), None)
-            self.assertEqual(self.instance.available(), None)
+        with base.SolverBase() as instance:
+            self.assertFalse(instance.is_persistent())
+            self.assertEqual(instance.name, 'solverbase')
+            self.assertEqual(instance.CONFIG, instance.config)
 
-    @unittest.mock.patch.multiple(base.SolverBase, __abstractmethods__=set())
     def test_config_kwds(self):
-        self.instance = base.SolverBase(tee=True)
-        self.assertTrue(self.instance.config.tee)
+        instance = base.SolverBase(tee=True)
+        self.assertTrue(instance.config.tee)
 
-    @unittest.mock.patch.multiple(base.SolverBase, __abstractmethods__=set())
-    def test_solver_availability(self):
-        self.instance = base.SolverBase()
-        self.instance.Availability._value_ = 1
-        self.assertTrue(self.instance.Availability.__bool__(self.instance.Availability))
-        self.instance.Availability._value_ = -1
-        self.assertFalse(
-            self.instance.Availability.__bool__(self.instance.Availability)
-        )
-
-    @unittest.mock.patch.multiple(base.SolverBase, __abstractmethods__=set())
     def test_custom_solver_name(self):
-        self.instance = base.SolverBase(name='my_unique_name')
-        self.assertEqual(self.instance.name, 'my_unique_name')
+        instance = base.SolverBase(name='my_unique_name')
+        self.assertEqual(instance.name, 'my_unique_name')
 
 
 class TestPersistentSolverBase(unittest.TestCase):
-    def test_abstract_member_list(self):
-        expected_list = [
-            'remove_parameters',
-            'version',
-            'update_variables',
-            'remove_variables',
-            'add_constraints',
-            '_get_primals',
-            'set_instance',
-            'set_objective',
-            'update_parameters',
-            'remove_block',
-            'add_block',
-            'available',
-            'add_parameters',
-            'remove_constraints',
-            'add_variables',
-            'solve',
-        ]
-        member_list = list(base.PersistentSolverBase.__abstractmethods__)
-        self.assertEqual(sorted(expected_list), sorted(member_list))
-
     def test_class_method_list(self):
         expected_list = [
-            'Availability',
             'CONFIG',
             '_get_duals',
             '_get_primals',
@@ -132,48 +87,43 @@ class TestPersistentSolverBase(unittest.TestCase):
         ]
         self.assertEqual(sorted(expected_list), sorted(method_list))
 
-    @unittest.mock.patch.multiple(base.PersistentSolverBase, __abstractmethods__=set())
     def test_init(self):
-        self.instance = base.PersistentSolverBase()
-        self.assertTrue(self.instance.is_persistent())
-        self.assertEqual(self.instance.set_instance(None), None)
-        self.assertEqual(self.instance.add_variables(None), None)
-        self.assertEqual(self.instance.add_parameters(None), None)
-        self.assertEqual(self.instance.add_constraints(None), None)
-        self.assertEqual(self.instance.add_block(None), None)
-        self.assertEqual(self.instance.remove_variables(None), None)
-        self.assertEqual(self.instance.remove_parameters(None), None)
-        self.assertEqual(self.instance.remove_constraints(None), None)
-        self.assertEqual(self.instance.remove_block(None), None)
-        self.assertEqual(self.instance.set_objective(None), None)
-        self.assertEqual(self.instance.update_variables(None), None)
-        self.assertEqual(self.instance.update_parameters(), None)
-
+        instance = base.PersistentSolverBase()
+        self.assertTrue(instance.is_persistent())
         with self.assertRaises(NotImplementedError):
-            self.instance._get_primals()
-
+            self.assertEqual(instance.set_instance(None), None)
         with self.assertRaises(NotImplementedError):
-            self.instance._get_duals()
-
+            self.assertEqual(instance.add_variables(None), None)
         with self.assertRaises(NotImplementedError):
-            self.instance._get_reduced_costs()
+            self.assertEqual(instance.add_parameters(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.add_constraints(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.add_block(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.remove_variables(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.remove_parameters(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.remove_constraints(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.remove_block(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.set_objective(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.update_variables(None), None)
+        with self.assertRaises(NotImplementedError):
+            self.assertEqual(instance.update_parameters(), None)
+        with self.assertRaises(NotImplementedError):
+            instance._get_primals()
+        with self.assertRaises(NotImplementedError):
+            instance._get_duals()
+        with self.assertRaises(NotImplementedError):
+            instance._get_reduced_costs()
 
-    @unittest.mock.patch.multiple(base.PersistentSolverBase, __abstractmethods__=set())
     def test_context_manager(self):
-        with base.PersistentSolverBase() as self.instance:
-            self.assertTrue(self.instance.is_persistent())
-            self.assertEqual(self.instance.set_instance(None), None)
-            self.assertEqual(self.instance.add_variables(None), None)
-            self.assertEqual(self.instance.add_parameters(None), None)
-            self.assertEqual(self.instance.add_constraints(None), None)
-            self.assertEqual(self.instance.add_block(None), None)
-            self.assertEqual(self.instance.remove_variables(None), None)
-            self.assertEqual(self.instance.remove_parameters(None), None)
-            self.assertEqual(self.instance.remove_constraints(None), None)
-            self.assertEqual(self.instance.remove_block(None), None)
-            self.assertEqual(self.instance.set_objective(None), None)
-            self.assertEqual(self.instance.update_variables(None), None)
-            self.assertEqual(self.instance.update_parameters(), None)
+        with base.PersistentSolverBase() as instance:
+            self.assertTrue(instance.is_persistent())
 
 
 class TestLegacySolverWrapper(unittest.TestCase):
@@ -193,9 +143,10 @@ class TestLegacySolverWrapper(unittest.TestCase):
         self.assertEqual(sorted(expected_list), sorted(method_list))
 
     def test_context_manager(self):
-        with base.LegacySolverWrapper() as instance:
-            with self.assertRaises(AttributeError):
-                instance.available()
+        with _LegacyWrappedSolverBase() as instance:
+            self.assertIsInstance(instance, _LegacyWrappedSolverBase)
+            with self.assertRaises(NotImplementedError):
+                self.assertFalse(instance.available(False))
 
     def test_map_config(self):
         # Create a fake/empty config structure that can be added to an empty
@@ -205,7 +156,7 @@ class TestLegacySolverWrapper(unittest.TestCase):
             'solver_options',
             ConfigDict(implicit=True, description="Options to pass to the solver."),
         )
-        instance = base.LegacySolverWrapper()
+        instance = _LegacyWrappedSolverBase()
         instance.config = self.config
         instance._map_config(
             True, False, False, 20, True, False, None, None, None, False, None, None
@@ -276,94 +227,76 @@ class TestLegacySolverWrapper(unittest.TestCase):
         # options can work in multiple ways (set from instantiation, set
         # after instantiation, set during solve).
         # Test case 1: Set at instantiation
-        solver = base.LegacySolverWrapper(options={'max_iter': 6})
+        solver = _LegacyWrappedSolverBase(options={'max_iter': 6})
         self.assertEqual(solver.options, {'max_iter': 6})
+        self.assertEqual(solver.config.solver_options, {'max_iter': 6})
 
         # Test case 2: Set later
-        solver = base.LegacySolverWrapper()
+        solver = _LegacyWrappedSolverBase()
         solver.options = {'max_iter': 4, 'foo': 'bar'}
         self.assertEqual(solver.options, {'max_iter': 4, 'foo': 'bar'})
+        self.assertEqual(solver.config.solver_options, {'max_iter': 4, 'foo': 'bar'})
 
         # Test case 3: pass some options to the mapping (aka, 'solve' command)
-        solver = base.LegacySolverWrapper()
-        config = ConfigDict(implicit=True)
-        config.declare(
-            'solver_options',
-            ConfigDict(implicit=True, description="Options to pass to the solver."),
-        )
-        solver.config = config
+        solver = _LegacyWrappedSolverBase()
         solver._map_config(options={'max_iter': 4})
+        self.assertEqual(solver.options, {'max_iter': 4})
         self.assertEqual(solver.config.solver_options, {'max_iter': 4})
 
         # Test case 4: Set at instantiation and override during 'solve' call
-        solver = base.LegacySolverWrapper(options={'max_iter': 6})
-        config = ConfigDict(implicit=True)
-        config.declare(
-            'solver_options',
-            ConfigDict(implicit=True, description="Options to pass to the solver."),
-        )
-        solver.config = config
+        solver = _LegacyWrappedSolverBase(options={'max_iter': 6})
         solver._map_config(options={'max_iter': 4})
+        self.assertEqual(solver.options, {'max_iter': 4})
         self.assertEqual(solver.config.solver_options, {'max_iter': 4})
-        self.assertEqual(solver.options, {'max_iter': 6})
 
         # solver_options are also supported
         # Test case 1: set at instantiation
-        solver = base.LegacySolverWrapper(solver_options={'max_iter': 6})
+        solver = _LegacyWrappedSolverBase(solver_options={'max_iter': 6})
         self.assertEqual(solver.options, {'max_iter': 6})
+        self.assertEqual(solver.config.solver_options, {'max_iter': 6})
 
         # Test case 2: pass some solver_options to the mapping (aka, 'solve' command)
-        solver = base.LegacySolverWrapper()
-        config = ConfigDict(implicit=True)
-        config.declare(
-            'solver_options',
-            ConfigDict(implicit=True, description="Options to pass to the solver."),
-        )
-        solver.config = config
+        solver = _LegacyWrappedSolverBase()
         solver._map_config(solver_options={'max_iter': 4})
+        self.assertEqual(solver.options, {'max_iter': 4})
         self.assertEqual(solver.config.solver_options, {'max_iter': 4})
 
         # Test case 3: Set at instantiation and override during 'solve' call
-        solver = base.LegacySolverWrapper(solver_options={'max_iter': 6})
-        config = ConfigDict(implicit=True)
-        config.declare(
-            'solver_options',
-            ConfigDict(implicit=True, description="Options to pass to the solver."),
-        )
-        solver.config = config
+        solver = _LegacyWrappedSolverBase(solver_options={'max_iter': 6})
         solver._map_config(solver_options={'max_iter': 4})
+        self.assertEqual(solver.options, {'max_iter': 4})
         self.assertEqual(solver.config.solver_options, {'max_iter': 4})
-        self.assertEqual(solver.options, {'max_iter': 6})
 
         # users can mix... sort of
         # Test case 1: Initialize with options, solve with solver_options
-        solver = base.LegacySolverWrapper(options={'max_iter': 6})
-        config = ConfigDict(implicit=True)
-        config.declare(
-            'solver_options',
-            ConfigDict(implicit=True, description="Options to pass to the solver."),
-        )
-        solver.config = config
+        solver = _LegacyWrappedSolverBase(options={'max_iter': 6})
         solver._map_config(solver_options={'max_iter': 4})
+        self.assertEqual(solver.options, {'max_iter': 4})
         self.assertEqual(solver.config.solver_options, {'max_iter': 4})
 
         # users CANNOT initialize both values at the same time, because how
         # do we know what to do with it then?
         # Test case 1: Class instance
         with self.assertRaises(ValueError):
-            solver = base.LegacySolverWrapper(
+            solver = _LegacyWrappedSolverBase(
                 options={'max_iter': 6}, solver_options={'max_iter': 4}
             )
         # Test case 2: Passing to `solve`
-        solver = base.LegacySolverWrapper()
+        solver = _LegacyWrappedSolverBase()
+        with self.assertRaises(ValueError):
+            solver._map_config(solver_options={'max_iter': 4}, options={'max_iter': 6})
+
+        # Test that assignment to maps to set_value:
+        solver = _LegacyWrappedSolverBase()
         config = ConfigDict(implicit=True)
         config.declare(
             'solver_options',
             ConfigDict(implicit=True, description="Options to pass to the solver."),
         )
         solver.config = config
-        with self.assertRaises(ValueError):
-            solver._map_config(solver_options={'max_iter': 4}, options={'max_iter': 6})
+        solver.config.solver_options.max_iter = 6
+        self.assertEqual(solver.options, {'max_iter': 6})
+        self.assertEqual(solver.config.solver_options, {'max_iter': 6})
 
     def test_map_results(self):
         # Unclear how to test this

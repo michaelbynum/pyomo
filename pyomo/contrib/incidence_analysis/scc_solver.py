@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -66,7 +66,14 @@ def generate_strongly_connected_components(
             )
         )
 
-    assert len(variables) == len(constraints)
+    if len(variables) != len(constraints):
+        nvar = len(variables)
+        ncon = len(constraints)
+        raise RuntimeError(
+            "generate_strongly_connected_components only supports systems with the"
+            f" same numbers of variables and equality constraints. Got {nvar}"
+            f" variables and {ncon} constraints."
+        )
     if igraph is None:
         igraph = IncidenceGraphInterface()
 
@@ -78,6 +85,8 @@ def generate_strongly_connected_components(
         subsets, include_fixed=include_fixed
     ):
         # TODO: How does len scale for reference-to-list?
+        # If this assert fails, it may be due to a bug in block_triangularize
+        # or generate_subsystem_block.
         assert len(block.vars) == len(block.cons)
         yield (block, inputs)
 

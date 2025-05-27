@@ -1,20 +1,19 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
 #  rights in this software.
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
-"""Configuration options for incidence graph generation
-"""
+"""Configuration options for incidence graph generation"""
 
 import enum
 from pyomo.common.config import ConfigDict, ConfigValue, InEnum
 from pyomo.common.modeling import NOTSET
-from pyomo.repn.plugins.nl_writer import AMPLRepnVisitor, text_nl_template
+from pyomo.repn.ampl import AMPLRepnVisitor
 from pyomo.repn.util import FileDeterminism, FileDeterminism_to_SortComponents
 
 
@@ -33,7 +32,7 @@ class IncidenceMethod(enum.Enum):
     """
 
     ampl_repn = 3
-    """Use ``pyomo.repn.plugins.nl_writer.AMPLRepnVisitor``"""
+    """Use ``pyomo.repn.ampl.AMPLRepnVisitor``"""
 
 
 class IncidenceOrder(enum.Enum):
@@ -140,7 +139,6 @@ def get_config_from_kwds(**kwds):
         export_defined_variables = False
         sorter = FileDeterminism_to_SortComponents(FileDeterminism.ORDERED)
         amplvisitor = AMPLRepnVisitor(
-            text_nl_template,
             subexpression_cache,
             external_functions,
             var_map,

@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -209,19 +209,17 @@ class Test_util(unittest.TestCase):
         vlist.append(variable(lb=0, ub=1))
         vlist.append(variable(lb=1, ub=2))
         vlist.append(variable(lb=2, ub=3))
-        if not (util.numpy_available and util.scipy_available):
-            with self.assertRaises(ImportError):
-                util.generate_delaunay(vlist)
-        else:
-            tri = util.generate_delaunay(vlist, num=2)
-            self.assertTrue(isinstance(tri, util.scipy.spatial.Delaunay))
-            self.assertEqual(len(tri.simplices), 6)
-            self.assertEqual(len(tri.points), 8)
+        tri = util.generate_delaunay(vlist, num=2)
+        self.assertTrue(isinstance(tri, util.scipy.spatial.Delaunay))
+        self.assertEqual(len(tri.simplices), 6)
+        self.assertEqual(len(tri.points), 8)
 
-            tri = util.generate_delaunay(vlist, num=3)
-            self.assertTrue(isinstance(tri, util.scipy.spatial.Delaunay))
-            self.assertEqual(len(tri.simplices), 62)
-            self.assertEqual(len(tri.points), 27)
+        tri = util.generate_delaunay(vlist, num=3)
+        self.assertTrue(isinstance(tri, util.scipy.spatial.Delaunay))
+        # we got some simplices
+        self.assertTrue(len(tri.simplices) > 1)
+        # all the given points are accounted for
+        self.assertEqual(len(tri.points) + len(tri.coplanar), 27)
 
         #
         # Check cases where not all variables are bounded

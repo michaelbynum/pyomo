@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -361,7 +361,7 @@ class PseudoMap(AutoSlots.Mixin):
         TODO
         """
         # Return True is the underlying Block contains the component
-        # name.  Note, if this Pseudomap soecifies a ctype or the
+        # name.  Note, if this Pseudomap specifies a ctype or the
         # active flag, we need to check that the underlying
         # component matches those flags
         if key in self._block._decl:
@@ -921,11 +921,7 @@ class BlockData(ActiveComponentData):
             a matching component is not found, None is returned.
 
         """
-        if type(label_or_component) is ComponentUID:
-            cuid = label_or_component
-        else:
-            cuid = ComponentUID(label_or_component)
-        return cuid.find_component_on(self)
+        return ComponentUID(label_or_component).find_component_on(self)
 
     @contextmanager
     def _declare_reserved_components(self):
@@ -960,13 +956,8 @@ class BlockData(ActiveComponentData):
                 % (name, type(val), self.name, type(getattr(self, name)))
             )
         #
-        # Skip the add_component() logic if this is a
-        # component type that is suppressed.
-        #
         _component = self.parent_component()
         _type = val.ctype
-        if _type in _component._suppress_ctypes:
-            return
         #
         # Raise an exception if the component already has a parent.
         #
@@ -1047,12 +1038,6 @@ component, use the block del_component() and add_component() methods.
             idx_info[2] += 1
         else:
             self._ctypes[_type] = [_new_idx, _new_idx, 1]
-        #
-        # Propagate properties to sub-blocks:
-        #   suppressed ctypes
-        #
-        if _type is Block:
-            val._suppress_ctypes |= _component._suppress_ctypes
         #
         # Error, for disabled support implicit rule names
         #
@@ -1258,8 +1243,83 @@ component, use the block del_component() and add_component() methods.
             self._decl_order[idx] = (obj, tmp)
 
     def clone(self, memo=None):
-        """
-        TODO
+        """Make a copy of this block (and all components contained in it).
+
+        Pyomo models use :py:class:`Block` components to define a
+        hierarchical structure and provide model scoping.  When modeling
+        :py:class:`~pyomo.core.base.component.Component` objects are
+        assigned to a block, they are automatically added to that block's
+        scope.
+
+        :py:meth:`clone()` implements a specialization of
+        :py:func:`copy.deepcopy` that will deep copy the
+        :py:class:`BlockData` using that block's scope: that is, copy
+        the :py:class:`BlockData` and (recursively) all
+        :py:class:`Component` objects attached to it (including any
+        sub-blocks).  Pyomo
+        :py:class:`~pyomo.core.base.component.Component` /
+        :py:class:`~pyomo.core.base.component.ComponentData` objects
+        that are referenced through objects on this block but are not in
+        this block scope (i.e., are not owned by this block or a
+        subblock of this block) are not duplicated.
+
+        Parameters
+        ----------
+        memo : dict
+            A user-defined memo dictionary.  The dictionary will be
+            updated by :py:meth:`clone` and :py:func:`copy.deepcopy`.
+            See :py:meth:`object.__deepcopy__` for more information.
+
+        Examples
+        --------
+        Given the following model:
+
+        >>> m = pyo.ConcreteModel()
+        >>> m.I = pyo.RangeSet(3)
+        >>> m.x = pyo.Var()
+        >>> m.b1 = pyo.Block()
+        >>> m.b1.J = pyo.RangeSet(3)
+        >>> m.b1.y = pyo.Var(domain=pyo.Reals)
+        >>> m.b1.z = pyo.Var(m.I)
+        >>> m.b1.c = pyo.Constraint(expr=m.x >= m.b1.y + sum(m.b1.z[:]))
+        >>> m.b1.b2 = pyo.Block()
+        >>> m.b1.b2.w = pyo.Var(m.b1.J)
+        >>> m.b1.d = pyo.Constraint(expr=m.b1.y + sum(m.b1.b2.w[:]) == 5)
+
+        If we clone a block:
+
+        >>> i = m.b1.clone()
+
+        All local components are copied:
+
+        >>> assert m.b1 is not i
+        >>> assert m.b1.J is not i.J
+        >>> assert m.b1.y is not i.y
+        >>> assert m.b1.z is not i.z
+        >>> assert m.b1.b2 is not i.b2
+        >>> assert m.b1.b2.w is not i.b2.w
+
+        References to local components (in this case, Sets) are copied
+        and updated:
+
+        >>> assert m.b1.b2.w.index_set() is not i.b2.w.index_set()
+
+        But references to out-of-scope Sets (either global or in a
+        different block scope) are preserved:
+
+        >>> assert m.b1.y.index_set() is i.y.index_set()
+        >>> assert m.b1.z.index_set() is i.z.index_set()
+        >>> assert m.b1.y.domain is i.y.domain
+
+        Expressions are also updated in a similar manner: the new
+        expression will reference the new (copied) components for any
+        components in scope, but references to out-of-scope components
+        will be preserved:
+
+        >>> from pyomo.core.expr.compare import compare_expressions
+        >>> assert compare_expressions(i.c.expr, m.x >= i.y + sum(i.z[:]))
+        >>> assert compare_expressions(i.d.expr, i.y + sum(i.b2.w[:]) == 5)
+
         """
         # FYI: we used to remove all _parent() weakrefs before
         # deepcopying and then restore them on the original and cloned
@@ -1953,14 +2013,15 @@ component, use the block del_component() and add_component() methods.
         _new = self.__class__.__new__(self.__class__)
         _ans = memo.setdefault(id(self), _new)
         if _ans is _new:
-            component_list.append(self)
+            component_list.append((self, _new))
             # Blocks (and block-like things) need to pre-populate all
             # Components / ComponentData objects to help prevent
             # deepcopy() from violating the Python recursion limit.
             # This step is recursive; however, we do not expect "super
             # deep" Pyomo block hierarchies, so should be okay.
-            for comp in self.component_map().values():
-                comp._create_objects_for_deepcopy(memo, component_list)
+            for comp, _ in self._decl_order:
+                if comp is not None:
+                    comp._create_objects_for_deepcopy(memo, component_list)
         return _ans
 
     def private_data(self, scope=None):
@@ -2029,7 +2090,6 @@ class Block(ActiveIndexedComponent):
 
     def __init__(self, *args, **kwargs):
         """Constructor"""
-        self._suppress_ctypes = set()
         _rule = kwargs.pop('rule', None)
         _options = kwargs.pop('options', None)
         # As concrete applies to the Block at declaration time, we will

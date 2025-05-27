@@ -2,7 +2,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -207,20 +207,24 @@ class kestrelAMPL(object):
                 password = m.groups()[0]
         return (jobNumber, password)
 
+    def getAvailableSolvers(self):
+        """Return a list of all NEOS solvers that this interface supports"""
+        allKestrelSolvers = self.neos.listSolversInCategory("kestrel")
+        _ampl = ':AMPL'
+        return sorted(s[: -len(_ampl)] for s in allKestrelSolvers if s.endswith(_ampl))
+
     def getSolverName(self):
         """
         Read in the kestrel_options to pick out the solver name.
+
         The tricky parts:
-          we don't want to be case sensitive, but NEOS is.
-          we need to read in options variable
+
+          - we don't want to be case sensitive, but NEOS is.
+          - we need to read in options variable
+
         """
         # Get a list of available kestrel solvers from NEOS
-        allKestrelSolvers = self.neos.listSolversInCategory("kestrel")
-        kestrelAmplSolvers = []
-        for s in allKestrelSolvers:
-            i = s.find(':AMPL')
-            if i > 0:
-                kestrelAmplSolvers.append(s[0:i])
+        kestrelAmplSolvers = self.getAvailableSolvers()
         self.options = None
         # Read kestrel_options to get solver name
         if "kestrel_options" in os.environ:

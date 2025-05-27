@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -562,7 +562,7 @@ class TestFourierMotzkinElimination(unittest.TestCase):
         fme = TransformationFactory('contrib.fourier_motzkin_elimination')
         fme.apply_to(m, vars_to_eliminate=disaggregatedVars, do_integer_arithmetic=True)
         # post-process
-        fme.post_process_fme_constraints(m, SolverFactory('glpk'))
+        fme.post_process_fme_constraints(m, SolverFactory('glpk'), tolerance=-1e-6)
 
         constraints = m._pyomo_contrib_fme_transformation.projected_constraints
         self.assertEqual(len(constraints), 11)

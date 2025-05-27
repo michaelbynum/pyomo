@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -101,13 +101,14 @@ class ASL(SystemCallSolver):
                 timeout=5,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                universal_newlines=True,
+                text=True,
+                errors='ignore',
             )
             ver = _extract_version(results.stdout)
             if ver is None:
                 # Some ASL solvers do not export a version number
                 if results.stdout.strip().split()[-1].startswith('ASL('):
-                    return '0.0.0'
+                    return (0, 0, 0)
             return ver
         except OSError:
             pass

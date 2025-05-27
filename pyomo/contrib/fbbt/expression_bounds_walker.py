@@ -1,7 +1,7 @@
 #  ___________________________________________________________________________
 #
 #  Pyomo: Python Optimization Modeling Objects
-#  Copyright (c) 2008-2024
+#  Copyright (c) 2008-2025
 #  National Technology and Engineering Solutions of Sandia, LLC
 #  Under the terms of Contract DE-NA0003525 with National Technology and
 #  Engineering Solutions of Sandia, LLC, the U.S. Government retains certain
@@ -232,15 +232,15 @@ def _handle_unknowable_bounds(visitor, node, arg):
 
 
 def _handle_equality(visitor, node, arg1, arg2):
-    return eq(*arg1, *arg2)
+    return eq(*arg1, *arg2, feasibility_tol=visitor.feasibility_tol)
 
 
 def _handle_inequality(visitor, node, arg1, arg2):
-    return ineq(*arg1, *arg2)
+    return ineq(*arg1, *arg2, feasibility_tol=visitor.feasibility_tol)
 
 
 def _handle_ranged(visitor, node, arg1, arg2, arg3):
-    return ranged(*arg1, *arg2, *arg3)
+    return ranged(*arg1, *arg2, *arg3, feasibility_tol=visitor.feasibility_tol)
 
 
 def _handle_expr_if(visitor, node, arg1, arg2, arg3):
