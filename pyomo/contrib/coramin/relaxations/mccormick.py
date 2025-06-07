@@ -509,6 +509,33 @@ def handle_pow_positive_odd_exponent(node, data, feasibility_tol):
     return [under, over, lb, ub]
 
 
+def handle_division_expression(node, data, feasibility_tol):
+    # x/y = x * y**-1
+    arg1_data, arg2_data = data
+    under1, over1, lb1, ub1 = arg1_data
+    under2, over2, lb2, ub2 = arg2_data
+    arg1, arg2 = node.args
+
+    if under1 is None or over1 is None or under2 is None or over2 is None:
+        return [None, None, None, None]
+    
+    pow_arg = arg2**(-1)
+    pow_under, pow_over, pow_lb, pow_ub = handle_pow_expression(
+        node=pow_arg,
+        data=[(under2, over2, lb2, ub2), (-1, -1, -1, -1)],
+        feasibility_tol=feasibility_tol,
+    )
+
+    prod_arg = arg1 * pow_arg
+    prod_under, prod_over, prod_lb, prod_ub = handle_product_expression(
+        node=prod_arg,
+        data=[(under1, over1, lb1, ub1), (pow_under, pow_over, pow_lb, pow_ub)],
+        feasibility_tol=feasibility_tol,
+    )
+
+    return [prod_under, prod_over, prod_lb, prod_ub]
+
+
 def handle_pow_expression(node, data, feasibility_tol):
     arg1_data, arg2_data = data
     under1, over1, lb1, ub1 = arg1_data
@@ -669,6 +696,8 @@ handlers = {
     ScalarVar: handle_var,
     ParamData: handle_param,
     ScalarParam: handle_param,
+    DivisionExpression: handle_division_expression,
+    NPV_DivisionExpression: handle_division_expression,
 }
 
 
