@@ -17,6 +17,8 @@ from pyomo.core.expr.numeric_expr import (
     NPV_SumExpression,
     UnaryFunctionExpression,
     NPV_UnaryFunctionExpression,
+    NPV_MinExpression,
+    NPV_MaxExpression,
 )
 from pyomo.core.base.var import VarData, ScalarVar
 from pyomo.core.base.param import ParamData, ScalarParam
@@ -28,6 +30,8 @@ import math
 from scipy.optimize import bisect
 from pyomo.core.expr.calculus.diff_with_pyomo import reverse_sd
 import warnings
+from pyomo.core.expr.calculus.diff_with_pyomo import _diff_map
+from pyomo.core.expr.visitor import identify_variables
 
 
 def log(x):
@@ -129,6 +133,142 @@ class MidExpression(NumericExpression):
     
     def _to_string(self, values, verbose, smap):
         return f"{self.getname()}({', '.join(values)})"
+
+
+CLOSE_TOL = 1e-12
+
+
+def _diff_max(node, val_dict, der_dict):
+    """
+    f(g(x, y)) where g(x, y) = max(x, y)
+
+    df/dx = df/dg * dg/dx
+    df/dy = df/dg * dg/dy
+
+    dg/dx = 1 if x >= y and 0 otherwise
+    dg/dy = 0 if x >= y and 0 otherwise
+
+    """
+    assert len(node.args) == 2
+    arg1, arg2 = node.args
+    der = der_dict[node]
+    val1 = val_dict[arg1]
+    val2 = val_dict[arg2]
+    if pe.is_constant(val1) and pe.is_constant(val2):
+        if math.isclose(val1, val2, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL):
+            der_dict[arg1] += 0.5 * der
+            der_dict[arg2] += 0.5 * der
+        elif val1 > val2:
+            der_dict[arg1] += der
+        elif val2 > val1:
+            der_dict[arg2] += der
+        else:
+            assert False
+    else:
+        raise NotImplementedError('Cannot symobilically differentiate the max function; please use numeric')
+        # der_dict[arg1] += ProductExpression((der, val1 >= val2))
+        # der_dict[arg2] += ProductExpression((der, val1 < val2))
+
+
+def _diff_min(node, val_dict, der_dict):
+    """
+    f(g(x, y)) where g(x, y) = min(x, y)
+
+    df/dx = df/dg * dg/dx
+    df/dy = df/dg * dg/dy
+
+    dg/dx = 1 if x <= y and 0 otherwise
+    dg/dy = 0 if x <= y and 0 otherwise
+
+    """
+    assert len(node.args) == 2
+    arg1, arg2 = node.args
+    der = der_dict[node]
+    val1 = val_dict[arg1]
+    val2 = val_dict[arg2]
+    if pe.is_constant(val1) and pe.is_constant(val2):
+        if math.isclose(val1, val2, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL):
+            der_dict[arg1] += 0.5 * der
+            der_dict[arg2] += 0.5 * der
+        elif val1 < val2:
+            der_dict[arg1] += der
+        elif val2 < val1:
+            der_dict[arg2] += der
+        else:
+            assert False
+    else:
+        raise NotImplementedError('Cannot symobilically differentiate the min function; please use numeric')
+        # der_dict[arg1] += ProductExpression((der, val1 <= val2))
+        # der_dict[arg2] += ProductExpression((der, val1 > val2))
+
+
+def _diff_mid(node, val_dict, der_dict):
+    """
+    f(g(x, y, z)) where g(x, y, z) = mid(x, y, z)
+
+    df/dx = df/dg * dg/dx
+    df/dy = df/dg * dg/dy
+    df/dz = df/dg * dg/dz
+
+    dg/dx = 1 if x >= y and x <= z or x >= z and x <= y
+    and so on
+
+    """
+    assert len(node.args) == 3
+    arg1, arg2, arg3 = node.args
+    der = der_dict[node]
+    val1 = val_dict[arg1]
+    val2 = val_dict[arg2]
+    val3 = val_dict[arg3]
+    if pe.is_constant(val1) and pe.is_constant(val2) and pe.is_constant(val3):
+        if math.isclose(
+            val1, val2, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL
+        ) and math.isclose(
+            val1, val3, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL
+        ):
+            der_dict[arg1] += der / 3
+            der_dict[arg2] += der / 3
+            der_dict[arg3] += der / 3
+        elif math.isclose(val1, val2, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL):
+            der_dict[arg1] += der * 0.5
+            der_dict[arg2] += der * 0.5
+        elif math.isclose(val1, val3, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL):
+            der_dict[arg1] += der * 0.5
+            der_dict[arg3] += der * 0.5
+        elif math.isclose(val2, val3, rel_tol=CLOSE_TOL, abs_tol=CLOSE_TOL):
+            der_dict[arg2] += der * 0.5
+            der_dict[arg3] += der * 0.5
+        elif val1 < max(val2, val3) and val1 > min(val2, val3):
+            der_dict[arg1] += der
+        elif val2 < max(val1, val3) and val2 > min(val1, val3):
+            der_dict[arg2] += der
+        elif val3 < max(val1, val2) and val3 > min(val1, val2):
+            der_dict[arg3] += der
+        else:
+            assert False
+    else:
+        raise NotImplementedError('Cannot symobilically differentiate the mid function; please use numeric')
+        # con1 = val1 <= MaxExpression((val2, val3))
+        # con2 = val1 >= MinExpression((val2, val3))
+        # con = ProductExpression((con1, con2))
+        # der_dict[arg1] += ProductExpression((der, con))
+
+        # con1 = val2 <= MaxExpression((val1, val3))
+        # con2 = val2 >= MinExpression((val1, val3))
+        # con = ProductExpression((con1, con2))
+        # der_dict[arg2] += ProductExpression((der, con))
+
+        # con1 = val3 <= MaxExpression((val1, val2))
+        # con2 = val3 >= MinExpression((val1, val2))
+        # con = ProductExpression((con1, con2))
+        # der_dict[arg3] += ProductExpression((der, con))
+
+
+_diff_map[MinExpression] = _diff_min
+_diff_map[MaxExpression] = _diff_max
+_diff_map[MidExpression] = _diff_mid
+_diff_map[NPV_MinExpression] = _diff_min
+_diff_map[NPV_MaxExpression] = _diff_max
 
 
 def handle_sum_expression(node, data, feasibility_tol):
@@ -723,10 +863,35 @@ class RelaxationVisitor(StreamBasedExpressionVisitor):
 relaxation_visitor = RelaxationVisitor()
 
 
-def generate_relaxation(expr: NumericExpression, feasibility_tol=1e-8):
+def generate_relaxation(
+    expr: NumericExpression, 
+    feasibility_tol=1e-8, 
+    rel_domain_push=1e-8, 
+    abs_domain_push=1e-8,
+):
+    """
+    It seems like the resulting under/over estimators may not 
+    be convex/concave at the boundaries of the domain. Therefore,
+    we need to broaden the boundaries slightly before generating 
+    the relaxation.
+    """
+    orig_bounds = {}
+    for v in identify_variables(expr, include_fixed=False):
+        orig_bounds[id(v)] = (v, v._lb, v._ub)
+        lb, ub = v.bounds
+        if lb is not None:
+            v.setlb(lb - rel_domain_push*abs(lb) - abs_domain_push)
+        if ub is not None:
+            v.setub(ub + rel_domain_push*abs(ub) + abs_domain_push)
+
     visitor = relaxation_visitor
     orig_feasibility_tol = visitor.feasibility_tol
     visitor.feasibility_tol = feasibility_tol
     under, over, lb, ub = visitor.walk_expression(expr)
     visitor.feasibility_tol = orig_feasibility_tol
+
+    for v, lb, ub in orig_bounds.values():
+        v.setlb(lb)
+        v.setub(ub)
+
     return under, over, lb, ub
