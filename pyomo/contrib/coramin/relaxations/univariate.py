@@ -971,8 +971,8 @@ class CustomUnivariateBaseRelaxationData(PWUnivariateRelaxationData):
         pw_repn='INC',
         relaxation_side=RelaxationSide.BOTH,
         use_linear_relaxation=True,
-        large_coef=1e5,
-        small_coef=1e-10,
+        large_coef=math.inf,
+        small_coef=0,
         safety_tol=1e-10,
     ):
         """
@@ -1010,8 +1010,8 @@ class CustomUnivariateBaseRelaxationData(PWUnivariateRelaxationData):
         pw_repn='INC',
         relaxation_side=RelaxationSide.BOTH,
         use_linear_relaxation=True,
-        large_coef=1e5,
-        small_coef=1e-10,
+        large_coef=math.inf,
+        small_coef=0,
         safety_tol=1e-10,
     ):
         """

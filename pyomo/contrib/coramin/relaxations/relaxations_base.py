@@ -766,7 +766,7 @@ class BasePWRelaxationData(BaseRelaxationData):
         relaxation_side=RelaxationSide.BOTH,
         use_linear_relaxation=True,
         large_coef=math.inf,
-        small_coef=1e-10,
+        small_coef=0,
         safety_tol=1e-10,
     ):
         super(BasePWRelaxationData, self).set_input(
