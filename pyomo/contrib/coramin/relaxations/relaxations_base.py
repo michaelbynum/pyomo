@@ -197,9 +197,9 @@ class BaseRelaxationData(BlockData):
         self,
         relaxation_side=RelaxationSide.BOTH,
         use_linear_relaxation=True,
-        large_coef=math.inf,
-        small_coef=0,
-        safety_tol=1e-10,
+        large_coef: float = math.inf,
+        small_coef: float = 0,
+        safety_tol: float = 1e-10,
     ):
         self.relaxation_side = relaxation_side
         self.use_linear_relaxation = use_linear_relaxation
@@ -765,7 +765,7 @@ class BasePWRelaxationData(BaseRelaxationData):
         self,
         relaxation_side=RelaxationSide.BOTH,
         use_linear_relaxation=True,
-        large_coef=1e5,
+        large_coef=math.inf,
         small_coef=1e-10,
         safety_tol=1e-10,
     ):

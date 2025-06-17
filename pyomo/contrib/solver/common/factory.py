@@ -13,6 +13,8 @@
 from pyomo.opt.base.solvers import LegacySolverFactory
 from pyomo.common.factory import Factory
 from pyomo.contrib.solver.common.base import LegacySolverWrapper
+from typing import overload, Optional
+from .base import SolverBase
 
 
 class SolverFactoryClass(Factory):
@@ -40,6 +42,9 @@ class SolverFactoryClass(Factory):
             return cls
 
         return decorator
+    
+    @overload
+    def __call__(self: SolverFactoryClass, name: str, **kwds) -> Optional[SolverBase]: ...
 
 
 SolverFactory = SolverFactoryClass()
