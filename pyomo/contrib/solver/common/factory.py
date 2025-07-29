@@ -9,7 +9,7 @@
 #  This software is distributed under the 3-clause BSD License.
 #  ___________________________________________________________________________
 
-
+from __future__ import annotations
 from pyomo.opt.base.solvers import LegacySolverFactory
 from pyomo.common.factory import Factory
 from pyomo.contrib.solver.common.base import LegacySolverWrapper
@@ -42,9 +42,11 @@ class SolverFactoryClass(Factory):
             return cls
 
         return decorator
-    
+
+    """
     @overload
     def __call__(self: SolverFactoryClass, name: str, **kwds) -> Optional[SolverBase]: ...
+    """
 
 
 SolverFactory = SolverFactoryClass()
