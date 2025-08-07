@@ -145,7 +145,6 @@ class Results(ConfigDict):
             'solution_loader',
             ConfigValue(
                 description="Object for loading the solution back into the model.",
-                visibility=DEVELOPER_OPTION,
             ),
         )
         self.termination_condition: TerminationCondition = self.declare(
