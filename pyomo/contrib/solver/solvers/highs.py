@@ -752,6 +752,11 @@ class Highs(PersistentSolverMixin, PersistentSolverUtils, PersistentSolverBase):
                 self._load_vars()
             else:
                 raise NoFeasibleSolutionError()
+            
+        results.solver_name = self.name
+        results.solver_version = self.version()
+        results.solver_config = config
+
         timer.stop('load solution')
 
         return results

@@ -19,7 +19,7 @@ def main():
 
     # we can override what is in the config with keyword arguments
     print('\n\n')
-    print('starting fist solve')
+    print('starting first solve')
     results = opt.solve(m, tee=False)
     print('done first solve')
 

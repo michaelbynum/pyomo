@@ -1,5 +1,6 @@
 import pyomo.environ as pyo
 from pyomo.contrib.solver.common.factory import SolverFactory
+from pyomo.common.log import LogStream
 import sys
 import io
 import logging
@@ -20,8 +21,9 @@ def main():
     opt = SolverFactory('highs')
 
     out = io.StringIO()
-    opt.config.tee = [sys.stdout, out, logger]
+    opt.config.tee = [sys.stdout, out, LogStream(level=logging.INFO, logger=logger)]
     results = opt.solve(m)
+    print('\n\nout.getvalue():')
     print(out.getvalue())
 
 
