@@ -15,9 +15,11 @@ def main():
     timer = HierarchicalTimer()
     opt = SolverFactory('highs')
     opt.config.timer = timer
-    for i in range(0, 100):
-        m.p.value = i
+    timer.start('total')
+    for p in range(100):
+        m.p.value = p
         results = opt.solve(m)
+    timer.stop('total')
     print(opt.config.timer)
 
 

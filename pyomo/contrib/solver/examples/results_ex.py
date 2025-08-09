@@ -15,6 +15,7 @@ def main():
     opt = SolverFactory('highs')
 
     results = opt.solve(m, load_solutions=False, raise_exception_on_nonoptimal_result=False)
+    print(results.solver_log)
 
     # if a feasible solution was found, print the primals and duals
     if results.incumbent_objective is not None:
