@@ -49,6 +49,8 @@ from pyomo.contrib.pynumero.interfaces.ampl_nlp import AmplNLP
 import numpy as np
 from scipy.sparse import coo_matrix
 from pyomo.repn.plugins.nl_writer import NLWriter
+from pyomo.contrib.solver.common.util import get_objective
+from pyomo.core.base import objective
 
 
 logger = logging.getLogger(__name__)
@@ -330,6 +332,7 @@ class PyrolInterface(SolverBase):
         TempfileManager.push()
         try:
             config = self.config(value=kwds, preserve_implicit=True)
+            config.writer_config.linear_presolve = False
 
             # hack to work around legacy solver wrapper __setattr__
             # otherwise, this would just be self.config = config
@@ -398,24 +401,36 @@ class PyrolInterface(SolverBase):
         timer.start('create pyrol model')
         self._clear()
 
-        timer.start('write nl file')
-        nl_fname = TempfileManager.create_tempfile(suffix='.nl')
-        # row_fname = TempfileManager.create_tempfile(suffix='.row')
-        # col_fname = TempfileManager.create_tempfile(suffix='.col')
-        with (
-            open(nl_fname, 'w', newline='\n', encoding='utf-8') as nl_file,
-            # open(row_fname, 'w', encoding='utf-8') as row_file,
-            # open(col_fname, 'w', encoding='utf-8') as col_file,
-        ):
-            writer = NLWriter()
-            writer.config.set_value(self.config.writer_config)
-            nl_info = writer.write(
-                model,
-                nl_file,
-                # row_file,
-                # col_file,
-            )
-        timer.stop('write nl file')
+        # we must have an objective
+        obj = get_objective(model)
+        if obj is None:
+            model._pyrol_dummy_objective = objective.Objective(expr=0)
+            has_obj = False
+        else:
+            has_obj = True
+
+        try:
+            timer.start('write nl file')
+            nl_fname = TempfileManager.create_tempfile(suffix='.nl')
+            # row_fname = TempfileManager.create_tempfile(suffix='.row')
+            # col_fname = TempfileManager.create_tempfile(suffix='.col')
+            with (
+                open(nl_fname, 'w', newline='\n', encoding='utf-8') as nl_file,
+                # open(row_fname, 'w', encoding='utf-8') as row_file,
+                # open(col_fname, 'w', encoding='utf-8') as col_file,
+            ):
+                writer = NLWriter()
+                writer.config.set_value(self.config.writer_config)
+                nl_info = writer.write(
+                    model,
+                    nl_file,
+                    # row_file,
+                    # col_file,
+                )
+            timer.stop('write nl file')
+        finally:
+            if obj is None:
+                del model._pyrol_dummy_objective
 
         timer.start('create AmplNLP')
         nlp = AmplNLP(
@@ -450,7 +465,6 @@ class PyrolInterface(SolverBase):
         timer.stop('create pyrol problem')
 
         # right now, the NLP object requires an objective
-        has_obj = True
         solution_loader = PyrolSolutionLoader(
             primal_arr=x,
             dual_arr=None,
@@ -505,12 +519,12 @@ class PyrolInterface(SolverBase):
         ):
             raise NoOptimalSolutionError()
 
-        if results.solution_status in {SolutionStatus.optimal, SolutionStatus.feasible}:
-            self._nlp.set_primals(self._x.array)
-            results.incumbent_objective = self._nlp.evaluate_objective()
-        else:
-            results.incumbent_objective = None
+        results.incumbent_objective = None
         results.objective_bound = None
+        if has_obj:
+            if results.solution_status in {SolutionStatus.optimal, SolutionStatus.feasible}:
+                self._nlp.set_primals(self._x.array)
+                results.incumbent_objective = self._nlp.evaluate_objective()
 
         self.config.timer.start('load solution')
         if self.config.load_solutions:

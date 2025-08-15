@@ -42,6 +42,7 @@ from pyomo.contrib.solver.common.util import (
     NoOptimalSolutionError,
 )
 from pyomo.contrib.solver.solvers.highs import Highs
+from pyomo.contrib.solver.solvers.rol import PyrolInterface
 from pyomo.core.expr.numeric_expr import LinearExpression
 from pyomo.core.expr.compare import assertExpressionsEqual
 
@@ -62,6 +63,7 @@ all_solvers = [
     ('ipopt', Ipopt),
     ('highs', Highs),
     ('scip_direct', SCIPDirect),
+    ('pyrol', PyrolInterface),
 ]
 mip_solvers = [
     ('gurobi_persistent', GurobiPersistent),
@@ -73,12 +75,14 @@ mip_solvers = [
 nlp_solvers = [
     ('ipopt', Ipopt),
     ('scip_direct', SCIPDirect),
+    ('pyrol', PyrolInterface),
 ]
 qcp_solvers = [
     ('gurobi_persistent', GurobiPersistent),
     ('gurobi_direct_quadratic', GurobiDirectQuadratic),
     ('ipopt', Ipopt),
     ('scip_direct', SCIPDirect),
+    ('pyrol', PyrolInterface),
 ]
 qp_solvers = qcp_solvers + [("highs", Highs)]
 miqcqp_solvers = [
@@ -86,7 +90,10 @@ miqcqp_solvers = [
     ('gurobi_direct_quadratic', GurobiDirectQuadratic),
     ('scip_direct', SCIPDirect),
 ]
-nl_solvers = [('ipopt', Ipopt)]
+nl_solvers = [
+    ('ipopt', Ipopt),
+    ('pyrol', PyrolInterface),
+]
 nl_solvers_set = {i[0] for i in nl_solvers}
 dual_solvers = [
     ('gurobi_persistent', GurobiPersistent),

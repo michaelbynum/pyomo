@@ -16,6 +16,7 @@ from .solvers.gurobi.gurobi_direct import GurobiDirect
 from .solvers.gurobi.gurobi_persistent import GurobiDirectQuadratic, GurobiPersistent
 from .solvers.highs import Highs
 from .solvers.scip.scip_direct import SCIPDirect
+from .solvers.rol import PyrolInterface
 
 
 def load():
@@ -45,3 +46,8 @@ def load():
         legacy_name='scip_direct_v2', 
         doc='Direct interface pyscipopt',
     )(SCIPDirect)
+    SolverFactory.register(
+        name='pyrol',
+        legacy_name='pyrol_v2',
+        doc='interface to pyrol',
+    )(PyrolInterface)
