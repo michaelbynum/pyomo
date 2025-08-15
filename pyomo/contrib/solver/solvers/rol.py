@@ -12,42 +12,18 @@
 import datetime
 import io
 import logging
-import math
 from typing import Tuple, List, Optional, Sequence, Mapping, Dict
 
 from pyomo.common.tempfiles import TempfileManager
 from pyomo.common.collections import ComponentMap, ComponentSet
-from pyomo.core.expr.numvalue import is_constant
 from pyomo.common.numeric_types import native_numeric_types
 from pyomo.common.errors import InfeasibleConstraintException, ApplicationError
 from pyomo.common.timing import HierarchicalTimer
 from pyomo.core.base.block import BlockData
-from pyomo.core.base.var import VarData, ScalarVar
-from pyomo.core.base.param import ParamData, ScalarParam
+from pyomo.core.base.var import VarData
 from pyomo.core.base.constraint import Constraint, ConstraintData
-from pyomo.core.base.sos import SOSConstraint, SOSConstraintData
 from pyomo.core.kernel.objective import minimize, maximize
-from pyomo.core.expr.numeric_expr import (
-    NegationExpression,
-    PowExpression,
-    ProductExpression,
-    MonomialTermExpression,
-    DivisionExpression,
-    SumExpression,
-    LinearExpression,
-    UnaryFunctionExpression,
-    NPV_NegationExpression,
-    NPV_PowExpression,
-    NPV_ProductExpression,
-    NPV_DivisionExpression,
-    NPV_SumExpression,
-    NPV_UnaryFunctionExpression,
-)
-from pyomo.gdp.disjunct import AutoLinkedBinaryVar
-from pyomo.core.base.expression import ExpressionData, ScalarExpression
-from pyomo.core.expr.relational_expr import EqualityExpression, InequalityExpression, RangedExpression
 from pyomo.core.staleflag import StaleFlagManager
-from pyomo.core.expr.visitor import StreamBasedExpressionVisitor
 from pyomo.common.dependencies import attempt_import
 from pyomo.contrib.solver.common.base import SolverBase, Availability
 from pyomo.contrib.solver.common.config import SolverConfig
@@ -56,7 +32,6 @@ from pyomo.contrib.solver.common.util import (
     NoOptimalSolutionError,
     NoSolutionError,
 )
-from pyomo.contrib.solver.common.util import get_objective
 from pyomo.contrib.solver.common.solution_loader import NoSolutionSolutionLoader
 from pyomo.contrib.solver.common.results import (
     Results,
@@ -69,13 +44,11 @@ from pyomo.contrib.solver.common.solution_loader import (
 )
 from pyomo.common.config import ConfigValue, ConfigDict
 from pyomo.common.tee import capture_output, TeeStream
-from pyomo.core.base.units_container import _PyomoUnit
-from pyomo.contrib.fbbt.fbbt import compute_bounds_on_expr
 from pyomo.contrib.pynumero.interfaces.nlp import ExtendedNLP
 from pyomo.contrib.pynumero.interfaces.ampl_nlp import AmplNLP
 import numpy as np
 from scipy.sparse import coo_matrix
-from pyomo.repn.plugins.nl_writer import NLWriter, NLWriterInfo
+from pyomo.repn.plugins.nl_writer import NLWriter
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +58,7 @@ pyrol, pyrol_available = attempt_import('pyrol')
 
 
 if pyrol_available:
-    from pyrol import Objective, Constraint, Problem, Solver, getCout
+    from pyrol import Objective, Constraint, Problem, Solver, getCout, Bounds
     from pyrol.vectors import NumPyVector
     from pyrol.pyrol.Teuchos import ParameterList
 else:
@@ -131,11 +104,13 @@ class PynumeroEqConstraint(Constraint):
         c[:] = self.nlp.evaluate_eq_constraints()
 
     def applyJacobian(self, jv, v, x, tol):
+        # print('apply jacobian eq')
         self.nlp.set_primals(x.array)
         jac: coo_matrix = self.nlp.evaluate_jacobian_eq()
         jv[:] = jac.dot(v.array)
 
     def applyAdjointJacobian(self, ajv, v, x, tol):
+        # print('adjoint jacobian eq')
         self.nlp.set_primals(x.array)
         jac: coo_matrix = self.nlp.evaluate_jacobian_eq()
         ajv[:] = jac.transpose().dot(v.array)
@@ -149,11 +124,52 @@ class PynumeroEqConstraint(Constraint):
         # compute the hessian of the lagrangian
         # subtract the hessian of the objective
         # now we should have the hessian applied with u
+        # print('adjoint hessian eq')
         self.nlp.set_primals(x.array)
         self.nlp.set_duals(self.zero_duals)
         hess_obj: coo_matrix = self.nlp.evaluate_hessian_lag()
         self.nlp.set_duals_eq(u.array)
-        hess: coo_matrix = self.nlp.evaluate_hessian_lag()
+        hess: coo_matrix = self.nlp.evaluate_hessian_lag() - hess_obj
+        ahuv[:] = hess.dot(v.array)
+
+
+class PynumeroIneqConstraint(Constraint):
+    def __init__(self, nlp: ExtendedNLP):
+        super().__init__()
+        self.nlp: ExtendedNLP = nlp
+        self.zero_duals = np.zeros(self.nlp.n_constraints(), dtype=float)
+
+    def value(self, c, x, tol):
+        self.nlp.set_primals(x.array)
+        c[:] = self.nlp.evaluate_ineq_constraints()
+
+    def applyJacobian(self, jv, v, x, tol):
+        # print('apply jacobian ineq')
+        self.nlp.set_primals(x.array)
+        jac: coo_matrix = self.nlp.evaluate_jacobian_ineq()
+        jv[:] = jac.dot(v.array)
+
+    def applyAdjointJacobian(self, ajv, v, x, tol):
+        # print('adjoint jacobian ineq')
+        self.nlp.set_primals(x.array)
+        jac: coo_matrix = self.nlp.evaluate_jacobian_ineq()
+        ajv[:] = jac.transpose().dot(v.array)
+
+    def applyAdjointHessian(self, ahuv, u, v, x, tol):
+        # hack
+        # set the duals to 0
+        # evaluate the hessian of the lagrangian
+        # with the duals set to 0, that should give the hessian of the objective
+        # now set the duals of the equality contraints to u
+        # compute the hessian of the lagrangian
+        # subtract the hessian of the objective
+        # now we should have the hessian applied with u
+        # print('adjoint hessian ineq')
+        self.nlp.set_primals(x.array)
+        self.nlp.set_duals(self.zero_duals)
+        hess_obj: coo_matrix = self.nlp.evaluate_hessian_lag()
+        self.nlp.set_duals_ineq(u.array)
+        hess: coo_matrix = self.nlp.evaluate_hessian_lag() - hess_obj
         ahuv[:] = hess.dot(v.array)
 
 
@@ -183,6 +199,14 @@ class PyrolConfig(SolverConfig):
                 domain=float, 
                 description="tolerance for checking for feasible solutions",
             ),
+        )
+        self.run_checks: bool = self.declare(
+            'run_checks',
+            ConfigValue(
+                default=False,
+                domain=bool,
+                description="run pyrol model checks",
+            )
         )
 
 
@@ -328,9 +352,10 @@ class PyrolInterface(SolverBase):
             stream = getCout()
 
             with capture_output(TeeStream(*ostreams), capture_fd=True):
-                timer.start('check pyrol problem')
-                pyrol_model.check(True, stream)
-                timer.stop('check pyrol problem')
+                if self.config.run_checks:
+                    timer.start('check pyrol problem')
+                    pyrol_model.check(True, stream)
+                    timer.stop('check pyrol problem')
                 timer.start('optimize')
                 solver.solve(stream)
                 timer.stop('optimize')
@@ -410,6 +435,18 @@ class PyrolInterface(SolverBase):
             eq_con = PynumeroEqConstraint(nlp=nlp)
             mult = NumPyVector(nlp.get_duals_eq())
             problem.addConstraint('equality_constraints', eq_con, mult)
+        if nlp.n_ineq_constraints() > 0:
+            ineq_con = PynumeroIneqConstraint(nlp=nlp)
+            mult = NumPyVector(nlp.get_duals_ineq())
+            lbs = NumPyVector(nlp.ineq_lb())
+            ubs = NumPyVector(nlp.ineq_ub())
+            bounds = Bounds(lbs, ubs)
+            problem.addConstraint('inequality_constraints', ineq_con, mult, bounds)
+        if np.any(np.isfinite(nlp.primals_lb())) or np.any(np.isfinite(nlp.primals_ub())):
+            lbs = NumPyVector(nlp.primals_lb())
+            ubs = NumPyVector(nlp.primals_ub())
+            bounds = Bounds(lbs, ubs)
+            problem.addBoundConstraint(bounds)
         timer.stop('create pyrol problem')
 
         # right now, the NLP object requires an objective
