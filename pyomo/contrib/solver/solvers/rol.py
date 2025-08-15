@@ -120,6 +120,43 @@ class PynumeroObjective(Objective):
         hv[:] = hess.dot(v.array)
 
 
+class PynumeroEqConstraint(Constraint):
+    def __init__(self, nlp: ExtendedNLP):
+        super().__init__()
+        self.nlp: ExtendedNLP = nlp
+        self.zero_duals = np.zeros(self.nlp.n_constraints(), dtype=float)
+
+    def value(self, c, x, tol):
+        self.nlp.set_primals(x.array)
+        c[:] = self.nlp.evaluate_eq_constraints()
+
+    def applyJacobian(self, jv, v, x, tol):
+        self.nlp.set_primals(x.array)
+        jac: coo_matrix = self.nlp.evaluate_jacobian_eq()
+        jv[:] = jac.dot(v.array)
+
+    def applyAdjointJacobian(self, ajv, v, x, tol):
+        self.nlp.set_primals(x.array)
+        jac: coo_matrix = self.nlp.evaluate_jacobian_eq()
+        ajv[:] = jac.transpose().dot(v.array)
+
+    def applyAdjointHessian(self, ahuv, u, v, x, tol):
+        # hack
+        # set the duals to 0
+        # evaluate the hessian of the lagrangian
+        # with the duals set to 0, that should give the hessian of the objective
+        # now set the duals of the equality contraints to u
+        # compute the hessian of the lagrangian
+        # subtract the hessian of the objective
+        # now we should have the hessian applied with u
+        self.nlp.set_primals(x.array)
+        self.nlp.set_duals(self.zero_duals)
+        hess_obj: coo_matrix = self.nlp.evaluate_hessian_lag()
+        self.nlp.set_duals_eq(u.array)
+        hess: coo_matrix = self.nlp.evaluate_hessian_lag()
+        ahuv[:] = hess.dot(v.array)
+
+
 class PyrolConfig(SolverConfig):
     def __init__(
         self,
@@ -369,6 +406,10 @@ class PyrolInterface(SolverBase):
         obj = PynumeroObjective(nlp=nlp)
         self._x = x = NumPyVector(nlp.get_primals())
         problem = Problem(obj, x)
+        if nlp.n_eq_constraints() > 0:
+            eq_con = PynumeroEqConstraint(nlp=nlp)
+            mult = NumPyVector(nlp.get_duals_eq())
+            problem.addConstraint('equality_constraints', eq_con, mult)
         timer.stop('create pyrol problem')
 
         # right now, the NLP object requires an objective
