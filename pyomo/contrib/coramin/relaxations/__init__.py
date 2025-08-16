@@ -14,3 +14,4 @@ from .univariate import PWCosRelaxation, PWCosRelaxationData
 from .alphabb import AlphaBBRelaxationData, AlphaBBRelaxation
 from .multivariate import MultivariateRelaxationData, MultivariateRelaxation
 from .iterators import relaxation_data_objects, nonrelaxation_component_data_objects
+from .auto_relax import relax
