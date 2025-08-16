@@ -1,7 +1,7 @@
 import logging
 import pyomo.environ as pyo
 from pyomo.contrib.coramin.utils.coramin_enums import RelaxationSide
-from .custom_block import declare_custom_block
+from pyomo.core.base.block import BlockData, declare_custom_block
 from .relaxations_base import BasePWRelaxationData, _check_cut
 import math
 from ._utils import check_var_pts, _get_bnds_list, _get_bnds_tuple
@@ -135,7 +135,7 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
     """
 
     def __init__(self, component):
-        BasePWRelaxationData.__init__(self, component)
+        super().__init__(component)
         self._x1 = None
         self._x2 = None
         self._aux_var = None
@@ -183,8 +183,8 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
         x2,
         aux_var,
         relaxation_side=RelaxationSide.BOTH,
-        large_coef=1e5,
-        small_coef=1e-10,
+        large_coef=math.inf,
+        small_coef=0,
         safety_tol=1e-10,
     ):
         """
@@ -199,7 +199,7 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
         relaxation_side : minlp.minlp_defn.RelaxationSide
             Provide the desired side for the relaxation (OVER, UNDER, or BOTH)
         """
-        super(PWMcCormickRelaxationData, self).set_input(
+        super().set_input(
             relaxation_side=relaxation_side,
             use_linear_relaxation=True,
             large_coef=large_coef,
@@ -218,8 +218,8 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
         x2,
         aux_var,
         relaxation_side=RelaxationSide.BOTH,
-        large_coef=1e5,
-        small_coef=1e-10,
+        large_coef=math.inf,
+        small_coef=0,
         safety_tol=1e-10,
     ):
         """
@@ -246,7 +246,7 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
         self.rebuild()
 
     def remove_relaxation(self):
-        super(PWMcCormickRelaxationData, self).remove_relaxation()
+        super().remove_relaxation()
         self._remove_relaxation()
 
     def rebuild(self, build_nonlinear_constraint=False, ensure_oa_at_vertices=True):
@@ -257,7 +257,7 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
             or (self._x1.lb == self._x1.ub and self._x1.lb is not None)
             or (self._x2.lb == self._x2.ub and self._x2.lb is not None)
         )
-        super(PWMcCormickRelaxationData, self).rebuild(
+        super().rebuild(
             build_nonlinear_constraint=build_nonlinear_constraint,
             ensure_oa_at_vertices=ensure_oa_at_vertices,
         )
@@ -272,7 +272,7 @@ class PWBilinearRelaxationData(BasePWRelaxationData):
                     self._remove_relaxation()
                     del self._pw
                     self._pw = pe.Block(concrete=True)
-                    _build_pw_mccormick_relaxation(
+                    _build_pw_bilinear_relaxation(
                         b=self._pw,
                         x1=self._x1,
                         x2=self._x2,
