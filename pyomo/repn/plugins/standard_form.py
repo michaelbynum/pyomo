@@ -20,6 +20,7 @@ from pyomo.common.config import (
     InEnum,
     document_kwargs_from_configdict,
 )
+from pyomo.common.errors import InfeasibleConstraintException
 from pyomo.common.dependencies import scipy, numpy as np
 from pyomo.common.enums import ObjectiveSense
 from pyomo.common.gc_manager import PauseGC
@@ -330,7 +331,7 @@ class _LinearStandardFormCompiler_impl(object):
         self.var_map = var_map = {}
         initialize_var_map_from_column_order(model, self.config, var_map)
 
-        var_recorder = TemplateVarRecorder(var_map, None, sorter)
+        var_recorder = TemplateVarRecorder(var_map, sorter)
         visitor = self._get_visitor({}, var_recorder=var_recorder)
         template_visitor = LinearTemplateRepnVisitor({}, var_recorder=var_recorder)
 
@@ -457,12 +458,12 @@ class _LinearStandardFormCompiler_impl(object):
                 # slack variable, but that seems rather silly.
                 continue
 
-            if not N:
+            if not N and offset.__class__ in native_types:
                 # This is a constant constraint
                 # TODO: add a (configurable) feasibility tolerance
                 if (lb is None or lb <= offset) and (ub is None or ub >= offset):
                     continue
-                raise InfeasibleError(
+                raise InfeasibleConstraintException(
                     f"model contains a trivially infeasible constraint, '{con.name}'"
                 )
 
@@ -597,6 +598,10 @@ class _LinearStandardFormCompiler_impl(object):
         return info
 
     def _create_csc(self, data, index, index_ptr, nnz, n_cols):
+        data = self._to_vector(itertools.chain.from_iterable(data), np.float64, nnz)
+        index = self._to_vector(itertools.chain.from_iterable(index), np.int32, nnz)
+        index_ptr = np.array(index_ptr, dtype=np.int32)
+
         if not nnz:
             # The empty CSC has no (or few) rows and a large number of
             # columns and no nonzeros: it is faster / easier to create
@@ -608,9 +613,6 @@ class _LinearStandardFormCompiler_impl(object):
                 (data, index, index_ptr), [len(index_ptr) - 1, n_cols]
             ).tocsc()
 
-        data = self._to_vector(itertools.chain.from_iterable(data), np.float64, nnz)
-        index = self._to_vector(itertools.chain.from_iterable(index), np.int32, nnz)
-        index_ptr = np.array(index_ptr, dtype=np.int32)
         A = self._csr_matrix((data, index, index_ptr), [len(index_ptr) - 1, n_cols])
         A = A.tocsc()
         A.sum_duplicates()

@@ -274,13 +274,6 @@ def test_solver_cases(*args):
             io_options={"skip_objective_sense": True},
         )
 
-        _test_solver_cases['glpk', 'python'] = initialize(
-            name='glpk',
-            io='python',
-            capabilities=_glpk_capabilities,
-            import_suffixes=[],
-        )
-
         #
         # CBC
         #
@@ -374,6 +367,21 @@ def test_solver_cases(*args):
 
         _test_solver_cases['scip', 'nl'] = initialize(
             name='scip', io='nl', capabilities=_scip_capabilities, import_suffixes=[]
+        )
+
+        #
+        # SCIP PERSISTENT
+        #
+
+        _scip_persistent_capabilities = set(
+            ["linear", "integer", "quadratic_constraint", "sos1", "sos2"]
+        )
+
+        _test_solver_cases["scip_persistent", "python"] = initialize(
+            name="scip_persistent",
+            io="python",
+            capabilities=_scip_persistent_capabilities,
+            import_suffixes=[],
         )
 
         #

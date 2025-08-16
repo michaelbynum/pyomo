@@ -249,6 +249,15 @@ ExpectedFailures['scip', 'nl', 'SOS1_simple'] = (
 )
 
 #
+# SCIP Persistent
+#
+
+ExpectedFailures["scip_persistent", "python", "LP_trivial_constraints"] = (
+    lambda v: v <= _trunk_version,
+    "SCIP does not allow empty constraints with no variables to be added to the Model.",
+)
+
+#
 # BARON
 #
 SkipTests['baron', 'bar', 'LP_trivial_constraints'] = (
@@ -279,6 +288,20 @@ for prob in ('LP_unbounded', 'LP_unbounded_kernel'):
     ExpectedFailures['baron', 'bar', prob] = (
         lambda v: v[:3] == (22, 1, 19),
         'BARON 22.1.19 reports model as optimal',
+    )
+for prob in (
+    'LP_block',
+    'LP_duals_maximize',
+    'LP_duals_minimize',
+    'LP_inactive_index',
+    'LP_simple',
+    'LP_trivial_constraints',
+    'QCP_simple',
+    'QP_simple',
+):
+    ExpectedFailures['baron', 'bar', prob] = (
+        lambda v: (25, 7, 10) <= v[:3] <= (25, 7, 16),
+        "BARON 25.7.16 returns 0 for duals/rc for models solved in preprocessing",
     )
 
 
