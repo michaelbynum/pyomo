@@ -51,13 +51,11 @@ def _solve_loop(
     solver: SolverBase,
 ) -> List[float]:
     if solver.is_persistent():
-        opt: SolverBase = SolverFactory(solver.name, treat_fixed_vars_as_params=False)
+        opt: SolverBase = SolverFactory(solver.name)
         opt.config = solver.config(preserve_implicit=True)
         opt.set_instance(m)
-        config: AutoUpdateConfig = opt.config.auto_updates
+        config: AutoUpdateConfig = opt.auto_updates
         config.check_for_new_or_removed_constraints = False
-        config.check_for_new_or_removed_vars = False
-        config.check_for_new_or_removed_params = False
         config.check_for_new_objective = False
         config.update_constraints = False
         config.update_vars = True
@@ -68,7 +66,11 @@ def _solve_loop(
         opt: SolverBase = SolverFactory(solver.name)
         opt.config = solver.config(preserve_implicit=True)
     w_list = list()
-    for _xval in x_list:
+    if tqdm is None:
+        xgen = x_list
+    else:
+        xgen = tqdm.tqdm(x_list)
+    for _xval in xgen:
         x.fix(_xval)
         res: Results = opt.solve(m, load_solutions=False)
         if res.solution_status != SolutionStatus.optimal:
@@ -133,6 +135,8 @@ def _plot_2d(
     x.unfix()
     x.value = orig_xval
     w.value = orig_wval
+    x.setlb(xlb)
+    x.setub(xub)
     del m._plotting_objective
     if orig_obj is not None:
         orig_obj.activate()
@@ -146,16 +150,14 @@ def _plot_3d(
     num_pts: int,
 ):
     if solver.is_persistent():
-        opt: SolverBase = SolverFactory(solver.name, treat_fixed_vars_as_params=False)
+        opt: SolverBase = SolverFactory(solver.name)
         opt.config = solver.config(preserve_implicit=True)
         opt.set_instance(m)
-        config: AutoUpdateConfig = opt.config.auto_updates
+        config: AutoUpdateConfig = opt.auto_updates
         config.check_for_new_or_removed_constraints = False
-        config.check_for_new_or_removed_vars = False
-        config.check_for_new_or_removed_params = False
         config.check_for_new_objective = False
         config.update_constraints = False
-        config.update_vars = False
+        config.update_vars = True
         config.update_parameters = False
         config.update_named_expressions = False
         config.update_objective = False
