@@ -1,7 +1,5 @@
 from pyomo.core.expr.calculus.diff_with_pyomo import reverse_sd
 from pyomo.core.expr.visitor import identify_variables
-from pyomo.common.collections import ComponentSet
-import enum
 import pyomo.environ as pe
 from pyomo.core.expr.numvalue import is_fixed
 import math
@@ -12,7 +10,6 @@ from pyomo.core.base.block import _BlockData
 from typing import Optional, MutableMapping
 from pyomo.core.expr.numeric_expr import ExpressionBase
 from pyomo.contrib.solver.common.base import SolverBase
-from pyomo.common.modeling import unique_component_name
 from pyomo.core.base.var import _GeneralVarData
 from pyomo.contrib.coramin.utils.pyomo_utils import simplify_expr
 
@@ -21,7 +18,7 @@ def _2d_determinant(mat: np.ndarray):
     return mat[0, 0] * mat[1, 1] - mat[1, 0] * mat[0, 1]
 
 
-def _determinant(mat):
+def _determinant(mat, use_simplification=False):
     nrows, ncols = mat.shape
     assert nrows == ncols
     if nrows == 1:
@@ -39,7 +36,9 @@ def _determinant(mat):
             next_mat = mat[next_rows, :]
             next_mat = next_mat[:, next_cols]
             det += (-1) ** (i + j) * mat[i, j] * _determinant(next_mat)
-    return simplify_expr(det)
+    if use_simplification:
+        det = simplify_expr(det)
+    return det
 
 
 class Hessian(object):
@@ -103,35 +102,6 @@ class Hessian(object):
         self._eigenvalue_problem = m
         return m
 
-    def formulate_eigenvalue_relaxation(self, sense=pe.minimize):
-        if self._eigenvalue_relaxation is not None:
-            for orig_v, rel_v in self._orig_to_relaxation_vars.items():
-                orig_lb, orig_ub = orig_v.bounds
-                rel_lb, rel_ub = rel_v.bounds
-                if orig_lb is not None:
-                    if rel_lb is None or orig_lb > rel_lb:
-                        rel_v.setlb(orig_lb)
-                if orig_ub is not None:
-                    if rel_ub is None or orig_ub < rel_ub:
-                        rel_v.setub(orig_ub)
-            from .iterators import relaxation_data_objects
-
-            for b in relaxation_data_objects(
-                self._eigenvalue_relaxation, descend_into=True, active=True
-            ):
-                b.rebuild()
-            self._eigenvalue_relaxation.obj.sense = sense
-            return self._eigenvalue_relaxation
-        m = self.formulate_eigenvalue_problem(sense=sense)
-        all_vars = list(
-            ComponentSet(m.component_data_objects(pe.Var, descend_into=True))
-        )
-        from .auto_relax import relax
-
-        relaxation = relax(m)
-        self._eigenvalue_relaxation = relaxation
-        return relaxation
-
     def _compute_eigenvalues_of_constant_hessian(self):
         assert self._constant_hessian
         nvars = len(self._var_list)
@@ -150,14 +120,11 @@ class Hessian(object):
             if self._constant_hessian_min_eig is None:
                 self._compute_eigenvalues_of_constant_hessian()
             res = self._constant_hessian_min_eig
-        elif self.method <= EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION:
+        elif self.method in {EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION, EigenValueBounder.GERSHGORIN}:
             res = self.bound_eigenvalues_from_interval_hessian()[0]
-        elif self.method == EigenValueBounder.LINEAR_PROGRAM:
-            m = self.formulate_eigenvalue_relaxation()
-            res = self.opt.solve(m).best_objective_bound
         else:
             m = self.formulate_eigenvalue_problem()
-            res = self.opt.solve(m).best_objective_bound
+            res = self.opt.solve(m).objective_bound
         return res
 
     def get_maximum_eigenvalue(self):
@@ -165,11 +132,8 @@ class Hessian(object):
             if self._constant_hessian_max_eig is None:
                 self._compute_eigenvalues_of_constant_hessian()
             res = self._constant_hessian_max_eig
-        elif self.method <= EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION:
+        elif self.method in {EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION, EigenValueBounder.GERSHGORIN}:
             res = self.bound_eigenvalues_from_interval_hessian()[1]
-        elif self.method == EigenValueBounder.LINEAR_PROGRAM:
-            m = self.formulate_eigenvalue_relaxation(sense=pe.maximize)
-            res = self.opt.solve(m).best_objective_bound
         else:
             m = self.formulate_eigenvalue_problem(sense=pe.maximize)
             res = self.opt.solve(m).best_objective_bound
@@ -218,7 +182,7 @@ class Hessian(object):
                     val = pe.value(der)
                     res[v1][v2] = val
                 else:
-                    if self.method >= EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION:
+                    if self.method == EigenValueBounder.GERSHGORIN_WITH_SIMPLIFICATION:
                         _der = simplify_expr(der)
                     else:
                         _der = der
