@@ -1234,8 +1234,7 @@ def _relax_cloned_model(m):
     for c in m.nonlinear.cons.values():
         repn = generate_standard_repn(c.body, quadratic=False, compute_values=True)
         assert len(repn.quadratic_vars) == 0
-        if repn.nonlinear_expr is None:
-            continue
+        assert repn.nonlinear_expr is not None
 
         cl, cu = c.lb, c.ub
         if cl is not None and cu is not None:
@@ -1258,17 +1257,18 @@ def _relax_cloned_model(m):
         else:
             new_body = repn.constant
 
-        relaxation_side_map = ComponentMap()
-        relaxation_side_map[repn.nonlinear_expr] = relaxation_side
+        if repn.nonlinear_expr is not None:
+            relaxation_side_map = ComponentMap()
+            relaxation_side_map[repn.nonlinear_expr] = relaxation_side
 
-        new_body += _relax_expr(
-            expr=repn.nonlinear_expr,
-            aux_var_map=aux_var_map,
-            parent_block=m,
-            relaxation_side_map=relaxation_side_map,
-            counter=counter,
-            degree_map=degree_map,
-        )
+            new_body += _relax_expr(
+                expr=repn.nonlinear_expr,
+                aux_var_map=aux_var_map,
+                parent_block=m,
+                relaxation_side_map=relaxation_side_map,
+                counter=counter,
+                degree_map=degree_map,
+            )
         m.linear.cons.add((cl, new_body, cu))
 
     if hasattr(m.nonlinear, 'obj'):
@@ -1294,17 +1294,18 @@ def _relax_cloned_model(m):
         else:
             new_body = repn.constant
 
-        relaxation_side_map = ComponentMap()
-        relaxation_side_map[repn.nonlinear_expr] = relaxation_side
+        if repn.nonlinear_expr is not None:
+            relaxation_side_map = ComponentMap()
+            relaxation_side_map[repn.nonlinear_expr] = relaxation_side
 
-        new_body += _relax_expr(
-            expr=repn.nonlinear_expr,
-            aux_var_map=aux_var_map,
-            parent_block=m,
-            relaxation_side_map=relaxation_side_map,
-            counter=counter,
-            degree_map=degree_map,
-        )
+            new_body += _relax_expr(
+                expr=repn.nonlinear_expr,
+                aux_var_map=aux_var_map,
+                parent_block=m,
+                relaxation_side_map=relaxation_side_map,
+                counter=counter,
+                degree_map=degree_map,
+            )
         m.linear.obj = pe.Objective(expr=new_body, sense=obj.sense)
 
     del m.nonlinear
