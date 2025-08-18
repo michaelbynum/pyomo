@@ -162,7 +162,7 @@ def filter_minlplib_instances(
     acceptable_formats = _process_acceptable_arg(
         'acceptable_formats',
         acceptable_formats,
-        set(['ams', 'gms', 'lp', 'mod', 'nl', 'osil', 'pip']),
+        set(['ams', 'gms', 'lp', 'mod', 'nl', 'osil', 'pip', 'py']),
     )
 
     default_acceptable_probtype = set()
@@ -487,6 +487,36 @@ def _handle_power_osil(node, var_map):
     return arg1**arg2
 
 
+def _handle_sin_osil(node, var_map):
+    assert len(node) == 1
+    arg1 = _parse_nonlinear_expression_osil(node[0], var_map)
+    return pe.sin(arg1)
+
+
+def _handle_cos_osil(node, var_map):
+    assert len(node) == 1
+    arg1 = _parse_nonlinear_expression_osil(node[0], var_map)
+    return pe.cos(arg1)
+
+
+def _handle_sqrt_osil(node, var_map):
+    assert len(node) == 1
+    arg1 = _parse_nonlinear_expression_osil(node[0], var_map)
+    return arg1**0.5
+
+
+def _handle_tanh_osil(node, var_map):
+    assert len(node) == 1
+    arg1 = _parse_nonlinear_expression_osil(node[0], var_map)
+    return pe.tanh(arg1)
+
+
+def _handle_log10_osil(node, var_map):
+    assert len(node) == 1
+    arg1 = _parse_nonlinear_expression_osil(node[0], var_map)
+    return pe.log10(arg1)
+
+
 _osil_operator_map = dict()
 _osil_operator_map['{os.optimizationservices.org}negate'] = _handle_negate_osil
 _osil_operator_map['{os.optimizationservices.org}divide'] = _handle_divide_osil
@@ -498,6 +528,11 @@ _osil_operator_map['{os.optimizationservices.org}exp'] = _handle_exp_osil
 _osil_operator_map['{os.optimizationservices.org}number'] = _handle_number_osil
 _osil_operator_map['{os.optimizationservices.org}square'] = _handle_square_osil
 _osil_operator_map['{os.optimizationservices.org}power'] = _handle_power_osil
+_osil_operator_map['{os.optimizationservices.org}sin'] = _handle_sin_osil
+_osil_operator_map['{os.optimizationservices.org}cos'] = _handle_cos_osil
+_osil_operator_map['{os.optimizationservices.org}sqrt'] = _handle_sqrt_osil
+_osil_operator_map['{os.optimizationservices.org}tanh'] = _handle_tanh_osil
+_osil_operator_map['{os.optimizationservices.org}log10'] = _handle_log10_osil
 
 
 def _parse_nonlinear_expression_osil(node, var_map):
@@ -569,21 +604,22 @@ def parse_osil_file(fname) -> ScalarBlock:
     con_names = []
     con_lbs = []
     con_ubs = []
-    constraints_node = list(instance_data.iter(ns + 'constraints'))[0]
-    for c in constraints_node.iter(ns + 'con'):
-        cdata = c.attrib
-        cname = cdata.pop('name')
-        if 'lb' in cdata:
-            clb = float(cdata.pop('lb'))
-        else:
-            clb = None
-        if 'ub' in cdata:
-            cub = float(cdata.pop('ub'))
-        else:
-            cub = None
-        con_names.append(cname)
-        con_lbs.append(clb)
-        con_ubs.append(cub)
+    constraints_node = list(instance_data.iter(ns + 'constraints'))
+    if len(constraints_node) > 0:
+        for c in constraints_node[0].iter(ns + 'con'):
+            cdata = c.attrib
+            cname = cdata.pop('name')
+            if 'lb' in cdata:
+                clb = float(cdata.pop('lb'))
+            else:
+                clb = None
+            if 'ub' in cdata:
+                cub = float(cdata.pop('ub'))
+            else:
+                cub = None
+            con_names.append(cname)
+            con_lbs.append(clb)
+            con_ubs.append(cub)
 
     # osil format specifies the linear parts of the constraints in CSR format
     if (ns + 'linearConstraintCoefficients') in instance_data_nodes:
