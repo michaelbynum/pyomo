@@ -13,7 +13,7 @@ from pyomo.contrib.solver.common.factory import SolverFactory
 from pyomo.core.base.block import BlockData
 from .relaxations_base import BaseRelaxationData
 from pyomo.core.base.var import VarData
-from typing import Sequence, List
+from typing import Sequence, List, Optional
 from pyomo.contrib.solver.common.config import AutoUpdateConfig
 from pyomo.core.base.objective import ObjectiveData
 
@@ -41,6 +41,17 @@ def _solve(
         )
     obj.deactivate()
     return res.incumbent_objective
+
+
+def plot_expr(expr, x, xl, xu, num_pts=100, **kwds) -> go.Scatter:
+    xlist = []
+    ylist = []
+    for _x in np.linspace(xl, xu, num_pts, endpoint=True):
+        x.value = float(_x)
+        xlist.append(_x)
+        ylist.append(pe.value(expr))
+    f = go.Scatter(x=xlist, y=ylist, name=str(expr), **kwds)
+    return f
 
 
 def _solve_loop(
@@ -84,16 +95,13 @@ def _solve_loop(
 
 def _plot_2d(
     m: BlockData, 
-    relaxation: BaseRelaxationData, 
+    x: VarData,
+    w: VarData,
+    should_min: bool,
+    should_max: bool,
     solver: SolverBase,
-    show_plot: bool, 
     num_pts: int,
-):
-    rhs_vars = relaxation.get_rhs_vars()
-    assert len(rhs_vars) == 1
-    x = rhs_vars[0]
-    w = relaxation.get_aux_var()
-
+) -> List[go.Scatter]:
     xlb, xub = x.bounds
     if xlb is None or xub is None:
         raise ValueError('rhs var must have bounds')
@@ -109,28 +117,20 @@ def _plot_2d(
     x_list = [float(i) for i in x_list]
     w_true = list()
 
-    rhs_expr = relaxation.get_rhs_expr()
-    for _x in x_list:
-        x.value = _x
-        w_true.append(pe.value(rhs_expr))
-    plotly_data = [go.Scatter(x=x_list, y=w_true, name=str(rhs_expr))]
+    plotly_data = []
 
     m._plotting_objective = pe.Objective(expr=w)
 
-    if relaxation.relaxation_side in {RelaxationSide.UNDER, RelaxationSide.BOTH}:
+    if should_min:
         w_min = _solve_loop(m, x, w, x_list, solver)
         plotly_data.append(go.Scatter(x=x_list, y=w_min, name='underestimator'))
 
     del m._plotting_objective
     m._plotting_objective = pe.Objective(expr=w, sense=pe.maximize)
 
-    if relaxation.relaxation_side in {RelaxationSide.OVER, RelaxationSide.BOTH}:
+    if should_max:
         w_max = _solve_loop(m, x, w, x_list, solver)
         plotly_data.append(go.Scatter(x=x_list, y=w_max, name='overestimator'))
-
-    fig = go.Figure(data=plotly_data)
-    if show_plot:
-        fig.show()
 
     x.unfix()
     x.value = orig_xval
@@ -141,12 +141,17 @@ def _plot_2d(
     if orig_obj is not None:
         orig_obj.activate()
 
+    return plotly_data
+
 
 def _plot_3d(
     m: BlockData, 
-    relaxation: BaseRelaxationData, 
+    x: VarData,
+    y: VarData,
+    w: VarData,
+    should_min: bool,
+    should_max: bool,
     solver: SolverBase, 
-    show_plot: bool, 
     num_pts: int,
 ):
     if solver.is_persistent():
@@ -165,10 +170,7 @@ def _plot_3d(
         opt: SolverBase = SolverFactory(solver.name)
         opt.config = solver.config(preserve_implicit=True)
 
-    rhs_vars = relaxation.get_rhs_vars()
-    x, y = rhs_vars
-    w = relaxation.get_aux_var()
-
+    rhs_vars = [x, y]
 
     if not x.has_lb() or not x.has_ub() or not y.has_lb() or not y.has_ub():
         raise ValueError('rhs vars must have bounds')
@@ -192,21 +194,14 @@ def _plot_3d(
     y_list = np.linspace(y.lb, y.ub, num_pts)
     x_list = [float(i) for i in x_list]
     y_list = [float(i) for i in y_list]
-    w_true = np.empty((num_pts, num_pts), dtype=float)
     w_min = np.empty((num_pts, num_pts), dtype=float)
     w_max = np.empty((num_pts, num_pts), dtype=float)
-
-    rhs_expr = relaxation.get_rhs_expr()
 
     def sub_loop(x_ndx, _x):
         x.fix(_x)
         for y_ndx, _y in enumerate(y_list):
             y.fix(_y)
-            w_true[x_ndx, y_ndx] = pe.value(rhs_expr)
-            if relaxation.relaxation_side in {
-                RelaxationSide.UNDER,
-                RelaxationSide.BOTH,
-            }:
+            if should_min:
                 obj_val = _solve(
                     m=m,
                     solver=opt,
@@ -215,10 +210,7 @@ def _plot_3d(
                     obj=m._underestimator_obj,
                 )
                 w_min[x_ndx, y_ndx] = obj_val
-            if relaxation.relaxation_side in {
-                RelaxationSide.OVER, 
-                RelaxationSide.BOTH,
-            }:
+            if should_max:
                 obj_val = _solve(
                     m=m,
                     solver=opt,
@@ -237,18 +229,14 @@ def _plot_3d(
 
     plotly_data = list()
     plotly_data.append(go.Surface(x=x_list, y=y_list, z=w_true, name=str(rhs_expr)))
-    if relaxation.relaxation_side in {RelaxationSide.UNDER, RelaxationSide.BOTH}:
+    if should_min:
         plotly_data.append(
             go.Surface(x=x_list, y=y_list, z=w_min, name='underestimator')
         )
-    if relaxation.relaxation_side in {RelaxationSide.OVER, RelaxationSide.BOTH}:
+    if should_max:
         plotly_data.append(
             go.Surface(x=x_list, y=y_list, z=w_max, name='overestimator')
         )
-
-    fig = go.Figure(data=plotly_data)
-    if show_plot:
-        fig.show()
 
     x.unfix()
     y.unfix()
@@ -260,6 +248,41 @@ def _plot_3d(
     if orig_obj is not None:
         orig_obj.activate()
 
+    return plotly_data
+
+
+def plot_relaxed_model(
+    m: BlockData,
+    z: VarData,
+    x: VarData,
+    y: Optional[VarData],
+    solver: SolverBase,
+    num_pts: int = 100,
+    should_min: bool = True,
+    should_max: bool = True,
+) -> List[go.Scatter]:
+    if y is None:
+        return _plot_2d(
+            m=m,
+            x=x,
+            w=z,
+            should_min=should_min,
+            should_max=should_max,
+            solver=solver,
+            num_pts=num_pts,
+        )
+    else:
+        return _plot_3d(
+            m=m,
+            x=x,
+            y=y,
+            w=z,
+            should_min=should_min,
+            should_max=should_max,
+            solver=solver,
+            num_pts=num_pts,
+        )
+
 
 def plot_relaxation(
     m: BlockData, 
@@ -267,13 +290,35 @@ def plot_relaxation(
     solver: SolverBase, 
     show_plot: bool = True, 
     num_pts: int = 100,
-):
+) -> List[go.Scatter]:
     rhs_vars = relaxation.get_rhs_vars()
+    should_min = relaxation.relaxation_side in {RelaxationSide.UNDER, RelaxationSide.BOTH}
+    should_max = relaxation.relaxation_side in {RelaxationSide.OVER, RelaxationSide.BOTH}
+    w = relaxation.get_aux_var()
 
     if len(rhs_vars) == 1:
-        _plot_2d(m, relaxation, solver, show_plot, num_pts)
+        x = rhs_vars[0]
+        return _plot_2d(
+            m=m,
+            x=x,
+            w=w,
+            should_min=should_min,
+            should_max=should_max,
+            solver=solver,
+            num_pts=num_pts,
+        )
     elif len(rhs_vars) == 2:
-        _plot_3d(m, relaxation, solver, show_plot, num_pts)
+        x, y = rhs_vars
+        return _plot_3d(
+            m=m,
+            x=x,
+            y=y,
+            w=w,
+            should_min=should_min,
+            should_max=should_max,
+            solver=solver,
+            num_pts=num_pts,
+        )
     else:
         raise NotImplementedError(
             'Cannot generate plot for relaxation with more than 2 RHS vars'
