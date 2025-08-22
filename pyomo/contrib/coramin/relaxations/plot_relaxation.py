@@ -54,6 +54,25 @@ def plot_expr(expr, x, xl, xu, num_pts=100, **kwds) -> go.Scatter:
     return f
 
 
+def plot_expr_3d(expr, x, xl, xu, y, yl, yu, num_pts=30, **kwds) -> go.Surface:
+    x_list = np.linspace(xl, xu, num_pts)
+    y_list = np.linspace(yl, yu, num_pts)
+    x_list = [float(i) for i in x_list]
+    y_list = [float(i) for i in y_list]
+    z_arr = np.empty((num_pts, num_pts), dtype=float)
+    if tqdm is None:
+        xgen = list(enumerate(x_list))
+    else:
+        xgen = tqdm.tqdm(list(enumerate(x_list)))
+    for xndx, _x in xgen:
+        for yndx, _y in enumerate(y_list):
+            x.value = _x
+            y.value = _y
+            _z = pe.value(expr)
+            z_arr[xndx, yndx] = _z
+    return go.Surface(x=x_list, y=y_list, z=z_arr, name=str(expr), **kwds)
+
+
 def _solve_loop(
     m: BlockData, 
     x: VarData, 
@@ -228,7 +247,6 @@ def _plot_3d(
             sub_loop(x_ndx, _x)
 
     plotly_data = list()
-    plotly_data.append(go.Surface(x=x_list, y=y_list, z=w_true, name=str(rhs_expr)))
     if should_min:
         plotly_data.append(
             go.Surface(x=x_list, y=y_list, z=w_min, name='underestimator')
