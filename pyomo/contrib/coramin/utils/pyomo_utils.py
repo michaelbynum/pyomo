@@ -58,12 +58,12 @@ def active_vars(
     seen = {}
     for c in m.component_data_objects(Constraint, active=True, descend_into=True):
         for v in identify_variables_with_cache(c, include_fixed=include_fixed):
-            seen[id(v)] = None
+            seen[id(v)] = v
     obj = get_objective(m)
     if obj is not None:
         for v in identify_variables(obj.expr, include_fixed=include_fixed):
-            seen[id(v)] = None
-    return list(seen.keys())
+            seen[id(v)] = v
+    return list(seen.values())
 
 
 def active_cons(m: BlockData) -> List[ConstraintData]:
