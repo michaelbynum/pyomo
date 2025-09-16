@@ -1,17 +1,18 @@
 import pyomo.environ as pyo
-from pyomo.core.base.var import _GeneralVarData
+from pyomo.core.base.var import VarData
 from pyomo.core.base.PyomoModel import ConcreteModel
 import warnings
 from pyomo.common.collections import ComponentMap
 from pyomo.core.kernel.objective import minimize, maximize
-from pyomo.contrib import appsi
 import logging
 import traceback
 from pyomo.common.dependencies import numpy as np
 import math
 import time
 from typing import Union, Sequence, Optional, List
-from pyomo.core.base.objective import ScalarObjective, _GeneralObjectiveData
+from pyomo.core.base.objective import ScalarObjective, ObjectiveData
+from pyomo.contrib.solver.common.base import SolverBase, PersistentSolverBase
+from pyomo.contrib.solver.common.results import Results, TerminationCondition, SolutionStatus
 
 try:
     import pyomo.contrib.coramin.utils.mpi_utils as mpiu
@@ -22,7 +23,8 @@ except ImportError:
 try:
     from tqdm import tqdm
 except ImportError:
-    pass
+    def tqdm(x, **kwargs):
+        return iter(x)
 
 
 logger = logging.getLogger(__name__)
@@ -37,8 +39,8 @@ class OBBTInfo(object):
 
 def _bt_cleanup(
     model,
-    solver: Union[appsi.base.Solver, appsi.base.PersistentSolver],
-    vardatalist: Optional[List[_GeneralVarData]],
+    solver: SolverBase,
+    vardatalist: Optional[List[VarData]],
     deactivated_objectives,
     orig_update_config,
     orig_config,
@@ -54,10 +56,10 @@ def _bt_cleanup(
     Parameters
     ----------
     model: pyo.ConcreteModel or pyo.Block
-    solver: Union[appsi.base.Solver, appsi.base.PersistentSolver]
-    vardatalist: List of _GeneralVarData
+    solver: SolverBase
+    vardatalist: List of VarData
     initial_var_values: ComponentMap
-    deactivated_objectives: list of _GeneralObjectiveData
+    deactivated_objectives: list of ObjectiveData
     orig_update_config: appsi.base.UpdateConfig
     orig_config: appsi.base.SolverConfig
     lower_bounds: Sequence of float
@@ -69,6 +71,7 @@ def _bt_cleanup(
     """
     if hasattr(model, '__objective_ineq'):
         if solver.is_persistent():
+            assert isinstance(solver, PersistentSolverBase)
             solver.remove_constraints([model.__objective_ineq])
         del model.__objective_ineq
 
@@ -76,57 +79,34 @@ def _bt_cleanup(
     for obj in deactivated_objectives:
         obj.activate()
         if solver.is_persistent():
+            assert isinstance(solver, PersistentSolverBase)
             solver.set_objective(obj)
 
     if lower_bounds is not None and upper_bounds is not None:
         for i, v in enumerate(vardatalist):
-            lb = lower_bounds[i]
-            ub = upper_bounds[i]
-            v.setlb(lb)
-            v.setub(ub)
+            v.setlb(lower_bounds[i])
+            v.setub(upper_bounds[i])
     elif lower_bounds is not None:
         for i, v in enumerate(vardatalist):
-            lb = lower_bounds[i]
-            v.setlb(lb)
+            v.setlb(lower_bounds[i])
     elif upper_bounds is not None:
         for i, v in enumerate(vardatalist):
-            ub = upper_bounds[i]
-            v.setub(ub)
+            v.setub(upper_bounds[i])
     if vardatalist is not None and solver.is_persistent():
+        assert isinstance(solver, PersistentSolverBase)
         solver.update_variables(vardatalist)
 
     if solver.is_persistent():
-        solver.update_config.check_for_new_or_removed_constraints = (
-            orig_update_config.check_for_new_or_removed_constraints
-        )
-        solver.update_config.check_for_new_or_removed_vars = (
-            orig_update_config.check_for_new_or_removed_vars
-        )
-        solver.update_config.check_for_new_or_removed_params = (
-            orig_update_config.check_for_new_or_removed_params
-        )
-        solver.update_config.check_for_new_objective = (
-            orig_update_config.check_for_new_objective
-        )
-        solver.update_config.update_constraints = orig_update_config.update_constraints
-        solver.update_config.update_vars = orig_update_config.update_vars
-        solver.update_config.update_params = orig_update_config.update_params
-        solver.update_config.update_named_expressions = (
-            orig_update_config.update_named_expressions
-        )
-        solver.update_config.update_objective = orig_update_config.update_objective
-        solver.update_config.treat_fixed_vars_as_params = (
-            orig_update_config.treat_fixed_vars_as_params
-        )
+        assert isinstance(solver, PersistentSolverBase)
+        solver.auto_updates = orig_update_config
 
-    solver.config.stream_solver = orig_config.stream_solver
-    solver.config.load_solution = orig_config.load_solution
+    solver.config = orig_config
 
 
 def _single_solve(
     v,
     model,
-    solver: Union[appsi.base.Solver, appsi.base.PersistentSolver],
+    solver: SolverBase,
     lb_or_ub,
     obbt_info,
 ):
@@ -139,16 +119,17 @@ def _single_solve(
         model.__obj_bounds_tightening = ScalarObjective(expr=v, sense=pyo.maximize)
 
     if solver.is_persistent():
+        assert isinstance(solver, PersistentSolverBase)
         solver.set_objective(model.__obj_bounds_tightening)
-    results = solver.solve(model)
-    if results.termination_condition == appsi.base.TerminationCondition.optimal:
+    results: Results = solver.solve(model)
+    if results.termination_condition == TerminationCondition.convergenceCriteriaSatisfied:
         obbt_info.num_successful_problems += 1
-    if results.best_objective_bound is not None and math.isfinite(
-        results.best_objective_bound
+    if results.objective_bound is not None and math.isfinite(
+        results.objective_bound
     ):
-        new_bnd = results.best_objective_bound
-    elif results.termination_condition == appsi.base.TerminationCondition.optimal:
-        new_bnd = results.best_feasible_objective  # assumes the problem is convex
+        new_bnd = results.objective_bound
+    elif results.termination_condition == TerminationCondition.convergenceCriteriaSatisfied:
+        new_bnd = results.incumbent_objective  # assumes the problem is convex
     else:
         new_bnd = None
         msg = f'Warning: Bounds tightening for lb for var {str(v)} was unsuccessful. Termination condition: {results.termination_condition}; The lb was not changed.'
@@ -196,7 +177,7 @@ def _tighten_bnds(
     ----------
     model: pyo.ConcreteModel or pyo.Block
     solver: pyomo solver object
-    vardatalist: list of _GeneralVarData
+    vardatalist: list of VarData
     lb_or_ub: str
         'lb' or 'ub'
     time_limit: float
@@ -211,64 +192,45 @@ def _tighten_bnds(
 
     obbt_info.total_num_problems += len(vardatalist)
 
-    if with_progress_bar:
-        if progress_bar_string is None:
-            if lb_or_ub == 'lb':
-                bnd_str = 'LBs'
-            else:
-                bnd_str = 'UBs'
-            bnd_str = 'OBBT ' + bnd_str
+    if progress_bar_string is None:
+        if lb_or_ub == 'lb':
+            bnd_str = 'LBs'
         else:
-            bnd_str = progress_bar_string
-        if mpi_available:
-            tqdm_position = mpiu.MPI.COMM_WORLD.Get_rank()
-        else:
-            tqdm_position = 0
-        for v in tqdm(
-            vardatalist, ncols=100, desc=bnd_str, leave=False, position=tqdm_position
-        ):
-            if time.time() - t0 > time_limit:
-                if lb_or_ub == 'lb':
-                    if v.lb is None:
-                        new_bounds.append(np.nan)
-                    else:
-                        new_bounds.append(pyo.value(v.lb))
-                else:
-                    if v.ub is None:
-                        new_bounds.append(np.nan)
-                    else:
-                        new_bounds.append(pyo.value(v.ub))
-            else:
-                new_bnd = _single_solve(
-                    v=v,
-                    model=model,
-                    solver=solver,
-                    lb_or_ub=lb_or_ub,
-                    obbt_info=obbt_info,
-                )
-                new_bounds.append(new_bnd)
+            bnd_str = 'UBs'
+        bnd_str = 'OBBT ' + bnd_str
     else:
-        for v in vardatalist:
-            if time.time() - t0 > time_limit:
-                if lb_or_ub == 'lb':
-                    if v.lb is None:
-                        new_bounds.append(np.nan)
-                    else:
-                        new_bounds.append(pyo.value(v.lb))
+        bnd_str = progress_bar_string
+    if mpi_available:
+        tqdm_position = mpiu.MPI.COMM_WORLD.Get_rank()
+    else:
+        tqdm_position = 0
+    if with_progress_bar:
+        _iter = tqdm(
+           vardatalist, ncols=100, desc=bnd_str, leave=False, position=tqdm_position
+        )
+    else:
+        _iter = iter(vardatalist)
+    for v in _iter:
+        if time.time() - t0 > time_limit:
+            if lb_or_ub == 'lb':
+                if v.lb is None:
+                    new_bounds.append(np.nan)
                 else:
-                    if v.ub is None:
-                        new_bounds.append(np.nan)
-                    else:
-                        new_bounds.append(pyo.value(v.ub))
+                    new_bounds.append(pyo.value(v.lb))
             else:
-                new_bnd = _single_solve(
-                    v=v,
-                    model=model,
-                    solver=solver,
-                    lb_or_ub=lb_or_ub,
-                    obbt_info=obbt_info,
-                )
-                new_bounds.append(new_bnd)
+                if v.ub is None:
+                    new_bounds.append(np.nan)
+                else:
+                    new_bounds.append(pyo.value(v.ub))
+        else:
+            new_bnd = _single_solve(
+                v=v,
+                model=model,
+                solver=solver,
+                lb_or_ub=lb_or_ub,
+                obbt_info=obbt_info,
+            )
+            new_bounds.append(new_bnd)
 
     return new_bounds
 
@@ -351,7 +313,7 @@ def _bt_prep(model, solver, objective_bound=None):
 
 def _build_vardatalist(model, varlist=None, warning_threshold=0):
     """
-    Convert a list of pyomo variables to a list of SimpleVar and _GeneralVarData. If varlist is none, builds a
+    Convert a list of pyomo variables to a list of SimpleVar and VarData. If varlist is none, builds a
     list of all variables in the model. The new list is stored in the vars_to_tighten attribute.
 
     Parameters

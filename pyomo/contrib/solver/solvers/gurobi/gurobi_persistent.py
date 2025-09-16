@@ -650,6 +650,10 @@ class GurobiPersistent(GurobiDirectQuadratic, PersistentSolverBase):
     def auto_updates(self):
         return self._change_detector.config
 
+    @auto_updates.setter
+    def auto_updates(self, c):
+        self._change_detector.config = c
+
     def _clear(self):
         super()._clear()
         self._pyomo_model = None
