@@ -136,7 +136,7 @@ class Hessian(object):
             res = self.bound_eigenvalues_from_interval_hessian()[1]
         else:
             m = self.formulate_eigenvalue_problem(sense=pe.maximize)
-            res = self.opt.solve(m).best_objective_bound
+            res = self.opt.solve(m).objective_bound
         return res
 
     def bound_eigenvalues_from_interval_hessian(self):
