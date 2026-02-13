@@ -10,6 +10,7 @@
 #  ___________________________________________________________________________
 
 import logging
+import operator
 
 from pyomo.common.collections import ComponentMap
 from pyomo.common.config import In
@@ -22,6 +23,7 @@ from pyomo.common.timing import ConstructionTimer
 from pyomo.core.base.block import BlockData
 from pyomo.core.base.component import ActiveComponent, ModelComponentFactory
 from pyomo.core.base.disable_methods import disable_methods
+from pyomo.core.base.enums import SortComponents
 from pyomo.core.base.initializer import Initializer
 
 logger = logging.getLogger('pyomo.core')
@@ -386,12 +388,18 @@ class Suffix(ComponentMap, ActiveComponent):
         return self.direction
 
     def _pprint(self):
+        def _data(sort):
+            data = ((str(k), v) for k, v in self._dict.values())
+            if SortComponents.SORTED_INDICES in sort:
+                data = sorted(data, key=operator.itemgetter(0))
+            return data
+
         return (
             [
                 ('Direction', str(self._direction.name)),
                 ('Datatype', getattr(self._datatype, 'name', 'None')),
             ],
-            ((str(k), v) for k, v in self._dict.values()),
+            _data,
             ("Value",),
             lambda k, v: [v],
         )
@@ -401,9 +409,6 @@ class Suffix(ComponentMap, ActiveComponent):
     # called. We can't just switch the inheritance order due to
     # complications with __setstate__
     #
-
-    def pprint(self, *args, **kwds):
-        return ActiveComponent.pprint(self, *args, **kwds)
 
     def __str__(self):
         return ActiveComponent.__str__(self)
@@ -454,18 +459,31 @@ class SuffixFinder:
     def find(self, component_data):
         """Find suffix value for a given component data object in model tree
 
-        Suffixes are searched by traversing the model hierarchy in three passes:
+        If the `component_data` is attached to a block within the
+        `context` (that is, part of the model hierarchy rooted by the
+        `context` :py:`BlockData`), then :py:`Suffix` components are
+        searched by traversing the model hierarchy in three passes:
 
-        1. Search for a Suffix matching the specific component_data,
-           starting at the `root` and descending down the tree to
-           the component_data.  Return the first match found.
-        2. Search for a Suffix matching the component_data's container,
-           starting at the `root` and descending down the tree to
-           the component_data.  Return the first match found.
-        3. Search for a Suffix with key `None`, starting from the
-           component_data and working up the tree to the `root`.
+        1. Search for a :py:`Suffix` matching the specific `component_data`,
+           starting at the `root` (context block) and descending down
+           the tree to the `component_data`.  Return the first match
+           found.
+
+        2. Search for a :py:`Suffix` matching the `component_data`'s
+           container, starting at the `root` and descending down the
+           tree to the `component_data`.  Return the first match found.
+
+        3. Search for a :py:`Suffix` with key `None`, starting from the
+           `component_data` and working up the tree to the `root`.
            Return the first match found.
-        4. Return the default value
+
+        If the `component_data` is not part of the `context` hierarchy,
+        then only the :py:`Suffix` attached to the root context is
+        checked for the `component_data`, its container, and `None` (in
+        order).
+
+        If no valid value is found by searching :py:`Suffix` components,
+        then the `default` value is returned.
 
         Parameters
         ----------
@@ -475,7 +493,8 @@ class SuffixFinder:
 
         Returns
         -------
-        The value for Suffix associated with component data if found, else None.
+        Any
+            The value for Suffix associated with component data if found, else None.
 
         """
         # Walk parent tree and search for suffixes
@@ -488,8 +507,16 @@ class SuffixFinder:
         except AttributeError:
             # Component was outside the context (eventually parent
             # becomes None and parent.parent_block() raises an
-            # AttributeError): we will return the default value
-            return self.default
+            # AttributeError).
+            #
+            # We will check the context's suffix to see if there is an
+            # entry there.  We will look in the same order: component
+            # data, component, and None
+            #
+            # TBD: Should we check for / accept None?  The simple
+            # solution (and probably correct answer) is yes.
+            suffixes = self._suffixes_by_block[self._context]
+
         # Pass 1: look for the component_data, working root to leaf
         for s in suffixes:
             if component_data in s:
