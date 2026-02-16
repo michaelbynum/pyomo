@@ -126,7 +126,7 @@ def _get_uniform_point_grid(bounds, n, func, config):
     for (lb, ub), is_integer in bounds:
         if not is_integer:
             # Issues happen when exactly using the boundary
-            nudge = (ub - lb) * 1e-4
+            nudge = (ub - lb) * 1e-10
             linspaces.append(np.linspace(lb + nudge, ub - nudge, n))
         else:
             size = min(n, ub - lb + 1)
