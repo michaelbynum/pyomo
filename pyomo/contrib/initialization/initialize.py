@@ -32,7 +32,7 @@ def initialize_nlp(
 
     # run the initialization
     if method == InitializationMethod.pwl_approximation:
-        _initialize_with_piecewise_linear_approximation(
+        res = _initialize_with_piecewise_linear_approximation(
             nlp=nlp,
             mip_solver=mip_solver,
             nlp_solver=nlp_solver,
@@ -53,3 +53,5 @@ def initialize_nlp(
             assert v.fixed
         else:
             v.unfix()
+
+    return res

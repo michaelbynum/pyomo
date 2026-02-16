@@ -278,6 +278,7 @@ def _initialize_with_piecewise_linear_approximation(
     """
     pwl_expr_to_con_map = _get_pwl_constraints(pwl)
     solved = False
+    last_nlp_res = None
     for _iter in range(max_iter):
         logger.info(f'PWL initialization: iter {_iter}')
 
@@ -309,6 +310,7 @@ def _initialize_with_piecewise_linear_approximation(
 
         # try solving the NLP
         res = nlp_solver.solve(nlp, tee=True, load_solutions=False, raise_exception_on_nonoptimal_result=False)
+        last_nlp_res = res
         logger.info(f'solved NLP: {res.solution_status}, {res.termination_condition}')
         if res.incumbent_objective is not None:
             solved = True
@@ -317,3 +319,5 @@ def _initialize_with_piecewise_linear_approximation(
 
     if not solved:
         raise RuntimeError('no feasible solution found')
+
+    return last_nlp_res
