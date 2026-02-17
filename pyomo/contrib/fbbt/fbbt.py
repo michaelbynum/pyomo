@@ -965,7 +965,7 @@ def _prop_bnds_root_to_leaf_UnaryFunctionExpression(node, bnds_dict, feasibility
     if node.getname() in _unary_root_to_leaf_map:
         _unary_root_to_leaf_map[node.getname()](node, bnds_dict, feasibility_tol)
     else:
-        logger.warning(
+        logger.debug(
             'Unsupported expression type for FBBT: {0}. Bounds will not be improved in this part of '
             'the tree.'
             ''.format(node.getname())
@@ -1285,7 +1285,7 @@ class _FBBTVisitorRootToLeaf(ExpressionValueVisitor):
                 node, self.bnds_dict, self.feasibility_tol
             )
         else:
-            logger.warning(
+            logger.debug(
                 'Unsupported expression type for FBBT: {0}. Bounds will not be improved in this part of '
                 'the tree.'
                 ''.format(str(type(node)))
