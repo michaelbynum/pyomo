@@ -180,7 +180,7 @@ class _PWLRefinementVisitor(StreamBasedExpressionVisitor):
         setattr(self.m.auxiliary._pyomo_contrib_nonlinear_to_pwl, fname, new_func)
         new_expr = new_func(*variables)
         for v, val in zip(variables, var_values):
-            v.value = val
+            v.set_value(val, skip_validation=True)
         self.named_expr_map[node] = new_expr
         self.substitution[child] = new_expr.expr
         return False, new_expr.expr
@@ -311,7 +311,7 @@ def _initialize_with_piecewise_linear_approximation(
 
         #load the variable values back into orig_vars
         for ov, nv in zip(orig_vars, new_vars):
-            ov.value = nv.value
+            ov.set_value(nv.value, skip_validation=True)
 
         # refine the PWL approximation
         _refine_pwl_approx(
