@@ -322,7 +322,7 @@ def _initialize_with_piecewise_linear_approximation(
         logger.info('refined PWL approximation')
 
         # try solving the NLP
-        res = nlp_solver.solve(nlp, tee=True, load_solutions=False, raise_exception_on_nonoptimal_result=False)
+        res = nlp_solver.solve(nlp, load_solutions=False, raise_exception_on_nonoptimal_result=False)
         last_nlp_res = res
         logger.info(f'solved NLP: {res.solution_status}, {res.termination_condition}')
         if res.incumbent_objective is not None:
