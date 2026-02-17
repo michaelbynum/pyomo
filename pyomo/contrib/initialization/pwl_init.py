@@ -197,7 +197,20 @@ def _refine_pwl_approx(
     violations = []
     for expr in pwl_expr_to_con_map.keys():
         func = expr.pw_linear_function
-        var_vals = tuple(i.value for i in expr.args)
+        var_vals = []
+        for v in expr.args:
+            if math.isclose(v.lb, v.ub, rel_tol=1e-6, abs_tol=1e-6):
+                val = 0.5 * (v.lb + v.ub)
+            elif v.value is None:
+                val = None
+            else:
+                val = v.value
+                if val <= v.lb + 1e-6 + 1e-6 * abs(v.lb):
+                    val += 1e-5
+                if val >= v.ub - 1e-6 - 1e-6 * abs(v.ub):
+                    val -= 1e-5
+            var_vals.append(val)
+        # var_vals = tuple(i.value for i in expr.args)
         # for v, val in zip(expr.args, var_vals):
         #     print(f'{str(v):<20}{val:<20.5f}{v.lb:<20.5f}{v.ub:<20.5f}{id(v):<20}')
         if any(i is None for i in var_vals):
