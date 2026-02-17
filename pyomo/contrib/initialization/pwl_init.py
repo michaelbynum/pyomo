@@ -306,7 +306,7 @@ def _initialize_with_piecewise_linear_approximation(
         logger.info('applied the disaggregated logarithmic transformation')
 
         # solve the MILP
-        res = mip_solver.solve(_pwl, load_solutions=True)
+        res = mip_solver.solve(_pwl, load_solutions=True, raise_exception_on_nonoptimal_result=Fasle)
         logger.info(f'solved MILP: {res.solution_status}, {res.termination_condition}')
 
         #load the variable values back into orig_vars
