@@ -121,7 +121,7 @@ def _build_lp_approx(nlp: BlockData) -> BlockData:
         linear_part.multiplier = 1
         linear_part.constant = repn.constant
         linear_part.linear = repn.linear
-        linear-part.nonlinear = None
+        linear_part.nonlinear = None
         new_body = linear_part.to_expression(visitor=visitor)
         if repn.nonlinear is not None:
             replacement = _replace_expression_with_linear_approx(repn.nonlinear)
