@@ -921,3 +921,38 @@ def atan(xl, xu, yl, yu):
         ub = yu
 
     return lb, ub
+
+
+def tanh(xl, xu):
+    """
+    Parameters
+    ----------
+    xl: float
+    xu: float
+
+    Returns
+    -------
+    lb: float
+    ub: float
+    """
+
+    # tanh is monotonically increasing
+    return math.tanh(xl), math.tanh(xu)
+
+
+def atanh(xl, xu):
+    if xl < -1:
+        xl = -1
+    if xu > 1:
+        xu = 1
+
+    if xl == -1:
+        lb = -inf
+    else:
+        lb = math.atanh(xl)
+    if xu == 1:
+        ub = inf
+    else:
+        ub = math.atanh(xu)
+
+    return lb, ub
