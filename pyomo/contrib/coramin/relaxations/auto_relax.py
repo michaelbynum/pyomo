@@ -20,7 +20,7 @@ from .univariate import (
 )
 from .bilinear import PWBilinearRelaxation
 from pyomo.contrib.coramin.utils.coramin_enums import RelaxationSide, FunctionShape
-from pyomo.core.base.expression import _GeneralExpressionData, SimpleExpression
+from pyomo.core.base.expression import ExpressionData, ScalarExpression
 from pyomo.repn.standard_repn import generate_standard_repn
 from .iterators import relaxation_data_objects
 from pyomo.contrib.coramin.clone import clone_shallow_active_flat
@@ -937,8 +937,8 @@ _relax_leaf_to_root_map[numeric_expr.NPV_DivisionExpression] = (
 _relax_leaf_to_root_map[numeric_expr.NPV_UnaryFunctionExpression] = (
     _relax_leaf_to_root_UnaryFunctionExpression
 )
-_relax_leaf_to_root_map[_GeneralExpressionData] = _relax_leaf_to_root_GeneralExpression
-_relax_leaf_to_root_map[SimpleExpression] = _relax_leaf_to_root_GeneralExpression
+_relax_leaf_to_root_map[ScalarExpression] = _relax_leaf_to_root_GeneralExpression
+_relax_leaf_to_root_map[ExpressionData] = _relax_leaf_to_root_GeneralExpression
 
 
 def _relax_root_to_leaf_ProductExpression(node, relaxation_side_map):
@@ -1137,8 +1137,8 @@ _relax_root_to_leaf_map[numeric_expr.NPV_DivisionExpression] = (
 _relax_root_to_leaf_map[numeric_expr.NPV_UnaryFunctionExpression] = (
     _relax_root_to_leaf_UnaryFunctionExpression
 )
-_relax_root_to_leaf_map[_GeneralExpressionData] = _relax_root_to_leaf_GeneralExpression
-_relax_root_to_leaf_map[SimpleExpression] = _relax_root_to_leaf_GeneralExpression
+_relax_root_to_leaf_map[ScalarExpression] = _relax_root_to_leaf_GeneralExpression
+_relax_root_to_leaf_map[ExpressionData] = _relax_root_to_leaf_GeneralExpression
 
 
 class _FactorableRelaxationVisitor(ExpressionValueVisitor):
