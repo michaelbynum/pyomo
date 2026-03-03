@@ -311,6 +311,30 @@ def _prop_bnds_leaf_to_root_atan(visitor, node, arg):
     bnds_dict[node] = interval.atan(*bnds_dict[arg], -interval.inf, interval.inf)
 
 
+def _prop_bnds_leaf_to_root_tanh(visitor, node, arg):
+    """
+
+    Parameters
+    ----------
+    visitor: _FBBTVisitorLeafToRoot
+    node: pyomo.core.expr.numeric_expr.UnaryFunctionExpression
+    """
+    bnds_dict = visitor.bnds_dict
+    bnds_dict[node] = interval.tanh(*bnds_dict[arg])
+
+
+def _prop_bnds_leaf_to_root_atanh(visitor, node, arg):
+    """
+
+    Parameters
+    ----------
+    visitor: _FBBTVisitorLeafToRoot
+    node: pyomo.core.expr.numeric_expr.UnaryFunctionExpression
+    """
+    bnds_dict = visitor.bnds_dict
+    bnds_dict[node] = interval.atanh(*bnds_dict[arg])
+
+
 def _prop_bnds_leaf_to_root_sqrt(visitor, node, arg):
     """
 
@@ -349,6 +373,8 @@ _unary_leaf_to_root_map = defaultdict(
         'atan': _prop_bnds_leaf_to_root_atan,
         'sqrt': _prop_bnds_leaf_to_root_sqrt,
         'abs': _prop_bnds_leaf_to_root_abs,
+        'tanh': _prop_bnds_leaf_to_root_tanh,
+        'atanh': _prop_bnds_leaf_to_root_atanh,
     },
 )
 
@@ -921,6 +947,32 @@ def _prop_bnds_root_to_leaf_atan(node, bnds_dict, feasibility_tol):
     bnds_dict[arg] = (lb1, ub1)
 
 
+def _prop_bnds_root_to_leaf_tanh(node, bnds_dict, feasibility_tol):
+    assert len(node.args) == 1
+    arg = node.args[0]
+    lb0, ub0 = bnds_dict[node]
+    lb1, ub1 = bnds_dict[arg]
+    _lb1, _ub1 = interval.atanh(lb0, ub0)
+    if _lb1 > lb1:
+        lb1 = _lb1
+    if _ub1 < ub1:
+        ub1 = _ub1
+    bnds_dict[arg] = (lb1, ub1)
+
+
+def _prop_bnds_root_to_leaf_atanh(node, bnds_dict, feasibility_tol):
+    assert len(node.args) == 1
+    arg = node.args[0]
+    lb0, ub0 = bnds_dict[node]
+    lb1, ub1 = bnds_dict[arg]
+    _lb1, _ub1 = interval.tanh(lb0, ub0)
+    if _lb1 > lb1:
+        lb1 = _lb1
+    if _ub1 < ub1:
+        ub1 = _ub1
+    bnds_dict[arg] = (lb1, ub1)
+
+
 def _prop_bnds_root_to_leaf_abs(node, bnds_dict, feasibility_tol):
     assert len(node.args) == 1
     arg = node.args[0]
@@ -946,6 +998,8 @@ _unary_root_to_leaf_map['acos'] = _prop_bnds_root_to_leaf_acos
 _unary_root_to_leaf_map['atan'] = _prop_bnds_root_to_leaf_atan
 _unary_root_to_leaf_map['sqrt'] = _prop_bnds_root_to_leaf_sqrt
 _unary_root_to_leaf_map['abs'] = _prop_bnds_root_to_leaf_abs
+_unary_root_to_leaf_map['tanh'] = _prop_bnds_root_to_leaf_tanh
+_unary_root_to_leaf_map['atanh'] = _prop_bnds_root_to_leaf_atanh
 
 
 def _prop_bnds_root_to_leaf_UnaryFunctionExpression(node, bnds_dict, feasibility_tol):
