@@ -8,6 +8,9 @@ from pyomo.core.base.var import VarData
 from pyomo.contrib.solver.common.base import SolverBase
 from pyomo.repn.linear import LinearRepnVisitor, LinearRepn
 from collections import deque
+import math
+from pyomo.contrib.initialization.utils import get_vars
+from tqdm import tqdm
 
 
 def _build_adjacency_maps(
@@ -79,6 +82,10 @@ def _tighten_var(
         load_solutions=False,
     )
     ub = res.objective_bound
+    if lb == -math.inf:
+        lb = None
+    if ub == math.inf:
+        ub = None
     return lb, ub
 
 
@@ -91,7 +98,7 @@ def _get_nonlinear_vars(m: BlockData) -> MutableSet[VarData]:
     exprs = [obj.expr for obj in objs]
     exprs.extend(con.body for con in cons)
 
-    for expr in [obj.expr for obj in objs]:
+    for expr in exprs:
         repn: LinearRepn = visitor.walk_expression(expr)
         if repn.nonlinear is None:
             continue
@@ -143,42 +150,49 @@ def run_obbt(
     improvement_tol: float = 0.1,
     max_iter: int = 1000,
 ) -> None:
-    nonlinear_vars = list(_get_nonlinear_vars(m))
+    # nonlinear_vars = list(_get_nonlinear_vars(m))
+    vlist = list(get_vars(m))
     var_con_map, con_var_map = _build_adjacency_maps(m)
-    sorter = _NonlinearVarSorter(var_con_map, con_var_map)
-    nonlinear_vars.sort(key=sorter)
+    #sorter = _NonlinearVarSorter(var_con_map, con_var_map)
+    #nonlinear_vars.sort(key=sorter)
 
-    to_tighten = deque(nonlinear_vars)
-    to_tighten_set = ComponentSet(nonlinear_vars)
+    #for v in nonlinear_vars:
+    #    print(v)
 
-    _iter = 0
-    while to_tighten:
-        if _iter >= max_iter:
-            break
-        v = to_tighten.popleft()
-        if v not in to_tighten_set:
-            continue
-        to_tighten_set.discard(v)
-        vl, vu = _tighten_var(
-            v,
-            var_con_map,
-            con_var_map,
-            num_hops,
-            solver,
-        )
-        _iter += 1
-        improved = False
-        if vl is not None and (v.lb is None or vl > v.lb + improvement_tol + improvement_tol * abs(v.lb)):
-            improved = True
-            v.setlb(vl)
-        elif vu is not None and (v.ub is None or vu < v.ub - improvement_tol - improvement_tol * abs(v.ub)):
-            improved = True
-            v.setub(vu)
-        v.setlb(vl)
-        v.setub(vu)
-        if improved:
-            for con in var_con_map[v]:
-                for ov in con_var_map[con]:
-                    if ov not in to_tighten_set:
-                        to_tighten_set.add(ov)
-                        to_tighten.append(ov)
+    #to_tighten = deque(nonlinear_vars)
+    #to_tighten_set = ComponentSet(nonlinear_vars)
+
+    #_iter = 0
+    #while to_tighten:
+    for _iter in range(3):
+        for v in tqdm(vlist):
+        # print(len(to_tighten))
+        # if _iter >= max_iter:
+        #     break
+        # v = to_tighten.popleft()
+        # if v not in to_tighten_set:
+        #     continue
+        # to_tighten_set.discard(v)
+            vl, vu = _tighten_var(
+                v,
+                var_con_map,
+                con_var_map,
+                num_hops,
+                solver,
+            )
+            # _iter += 1
+            # improved = False
+            if vl is not None and (v.lb is None or vl > v.lb + improvement_tol + improvement_tol * abs(v.lb)):
+                # improved = True
+                print(f'improved LB from {v.lb} to {vl}')
+                v.setlb(vl)
+            elif vu is not None and (v.ub is None or vu < v.ub - improvement_tol - improvement_tol * abs(v.ub)):
+                # improved = True
+                print(f'improved UB from {v.ub} to {vu}')
+                v.setub(vu)
+        # if improved:
+        #     for con in var_con_map[v]:
+        #         for ov in con_var_map[con]:
+        #             if ov not in to_tighten_set:
+        #                 to_tighten_set.add(ov)
+        #                 to_tighten.append(ov)
