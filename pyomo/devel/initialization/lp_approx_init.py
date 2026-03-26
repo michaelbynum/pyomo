@@ -1,10 +1,20 @@
+# ____________________________________________________________________________________
+#
+# Pyomo: Python Optimization Modeling Objects
+# Copyright (c) 2008-2026 National Technology and Engineering Solutions of Sandia, LLC
+# Under the terms of Contract DE-NA0003525 with National Technology and Engineering
+# Solutions of Sandia, LLC, the U.S. Government retains certain rights in this
+# software.  This software is distributed under the 3-clause BSD License.
+# ____________________________________________________________________________________
+
 from pyomo.core.base.block import BlockData
 import pyomo.environ as pe
-from pyomo.contrib.initialization.bounds.bound_variables import bound_all_nonlinear_variables
-from pyomo.contrib.initialization.utils import fix_vars_with_equal_bounds, shallow_clone, get_vars
+from pyomo.devel.initialization.bounds.bound_variables import bound_all_nonlinear_variables
+from pyomo.devel.initialization.utils import fix_vars_with_equal_bounds, shallow_clone, get_vars
 from pyomo.core.expr.visitor import identify_components
 from pyomo.contrib.piecewise.piecewise_linear_expression import PiecewiseLinearExpression
 from pyomo.contrib.piecewise.piecewise_linear_function import PiecewiseLinearFunction
+from pyomo.contrib.solver.common.results import SolutionStatus
 from pyomo.common.collections import ComponentMap, ComponentSet
 from typing import MutableMapping, Sequence, List
 from pyomo.core.base.constraint import ConstraintData
@@ -36,7 +46,7 @@ import math
 from pyomo.contrib.solver.common.base import SolverBase
 import logging
 from pyomo.common.modeling import unique_component_name
-from pyomo.contrib.initialization.pwl_init import _minimize_infeasibility
+from pyomo.devel.initialization.pwl_init import _minimize_infeasibility
 from pyomo.contrib.fbbt.fbbt import fbbt
 from pyomo.repn.linear import LinearRepnVisitor, LinearRepn
 from pyomo.core.expr.visitor import identify_variables
@@ -137,6 +147,7 @@ def _initialize_with_LP_approximation(
     nlp: BlockData,
     lp_solver: SolverBase,
     nlp_solver: SolverBase,
+    default_bound=1.0e8, 
 ):
     orig_nlp = nlp
     logger.info('Starting initialization using a linear programming approximation')
@@ -149,9 +160,9 @@ def _initialize_with_LP_approximation(
     trans.apply_to(nlp, aggressive_substitution=False)
     logger.info('applied the univariate_nonlinear_decomposition transformation')
 
-    # let's see if we can get bounds on the nonlinear variables
-    fbbt(nlp)
-    logger.info('ran FBBT')
+    # bounds on the nonlinear variables
+    bound_all_nonlinear_variables(nlp, default_bound=default_bound)
+    logger.info('bounded nonlinear variables')
 
     # Now, we need to fix variables with equal (or nearly equal) bounds.
     # Otherwise, the PWL transformation complains
@@ -174,7 +185,8 @@ def _initialize_with_LP_approximation(
     # try solving the NLP
     nlp_res = nlp_solver.solve(orig_nlp, load_solutions=False, raise_exception_on_nonoptimal_result=False)
     logger.info(f'solved NLP: {nlp_res.solution_status}, {nlp_res.termination_condition}')
-    if nlp_res.incumbent_objective is not None:
+
+    if nlp_res.solution_status in {SolutionStatus.feasible, SolutionStatus.optimal}:
         nlp_res.solution_loader.load_vars()
     else:
         raise RuntimeError('no feasible solution found')

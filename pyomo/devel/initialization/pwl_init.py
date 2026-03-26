@@ -1,7 +1,16 @@
+# ____________________________________________________________________________________
+#
+# Pyomo: Python Optimization Modeling Objects
+# Copyright (c) 2008-2026 National Technology and Engineering Solutions of Sandia, LLC
+# Under the terms of Contract DE-NA0003525 with National Technology and Engineering
+# Solutions of Sandia, LLC, the U.S. Government retains certain rights in this
+# software.  This software is distributed under the 3-clause BSD License.
+# ____________________________________________________________________________________
+
 from pyomo.core.base.block import BlockData
 import pyomo.environ as pe
-from pyomo.contrib.initialization.bounds.bound_variables import bound_all_nonlinear_variables
-from pyomo.contrib.initialization.utils import fix_vars_with_equal_bounds, shallow_clone, get_vars
+from pyomo.devel.initialization.bounds.bound_variables import bound_all_nonlinear_variables
+from pyomo.devel.initialization.utils import fix_vars_with_equal_bounds, shallow_clone, get_vars
 from pyomo.core.expr.visitor import identify_components
 from pyomo.contrib.piecewise.piecewise_linear_expression import PiecewiseLinearExpression
 from pyomo.contrib.piecewise.piecewise_linear_function import PiecewiseLinearFunction
@@ -36,6 +45,7 @@ import math
 from pyomo.contrib.solver.common.base import SolverBase
 import logging
 from pyomo.common.modeling import unique_component_name
+from pyomo.contrib.solver.common.results import SolutionStatus
 
 
 logger = logging.getLogger(__name__)
@@ -325,7 +335,7 @@ def _initialize_with_piecewise_linear_approximation(
         res = nlp_solver.solve(nlp, load_solutions=False, raise_exception_on_nonoptimal_result=False)
         last_nlp_res = res
         logger.info(f'solved NLP: {res.solution_status}, {res.termination_condition}')
-        if res.incumbent_objective is not None:
+        if res.solution_status in {SolutionStatus.feasible, SolutionStatus.optimal}:
             solved = True
             res.solution_loader.load_vars()
             break
