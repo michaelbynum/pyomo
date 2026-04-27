@@ -18,7 +18,7 @@ from pyomo.common.collections import ComponentMap
 from pyomo.common.config import ConfigValue
 from pyomo.common.dependencies import attempt_import
 from pyomo.common.enums import ObjectiveSense
-from pyomo.common.errors import ApplicationError
+from pyomo.common.errors import ApplicationError, InfeasibleConstraintException
 from pyomo.common.shutdown import python_is_shutting_down
 from pyomo.common.tee import capture_output, TeeStream
 from pyomo.common.timing import HierarchicalTimer
@@ -34,6 +34,7 @@ from pyomo.contrib.solver.common.util import (
     NoReducedCostsError,
     NoSolutionError,
 )
+from pyomo.contrib.solver.common.solution_loader import NoSolutionSolutionLoader
 from pyomo.contrib.solver.common.results import (
     Results,
     SolutionStatus,
@@ -375,6 +376,8 @@ class GurobiDirectBase(SolverBase):
                 has_obj=has_obj,
                 config=config,
             )
+        except InfeasibleConstraintException:
+            res = self._get_infeasible_results(config=config)
         finally:
             os.chdir(orig_cwd)
 
@@ -406,6 +409,24 @@ class GurobiDirectBase(SolverBase):
                 grb.USER_OBJ_LIMIT: tc.objectiveLimit,
             }
         return GurobiDirectBase._tc_map
+
+    def _get_infeasible_results(self, config):
+        res = Results()
+        res.solution_loader = NoSolutionSolutionLoader()
+        res.solution_status = SolutionStatus.noSolution
+        res.termination_condition = TerminationCondition.provenInfeasible
+        res.incumbent_objective = None
+        res.objective_bound = None
+        res.iteration_count = None
+        res.timing_info.gurobi_time = None
+        res.solver_config = config
+        res.solver_name = self.name
+        res.solver_version = self.version()
+        if config.raise_exception_on_nonoptimal_result:
+            raise NoOptimalSolutionError()
+        if config.load_solutions:
+            raise NoFeasibleSolutionError()
+        return res
 
     def _populate_results(self, grb_model, solution_loader, has_obj, config):
         status = grb_model.Status
